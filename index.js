@@ -27,7 +27,7 @@ const client = new Client({
 
 let eventsData = {};
 
-/* ───── DATA ───── */
+/* ───── LOAD ───── */
 
 if (fs.existsSync('data.json')) {
   eventsData = JSON.parse(fs.readFileSync('data.json'));
@@ -37,7 +37,7 @@ function save() {
   fs.writeFileSync('data.json', JSON.stringify(eventsData, null, 2));
 }
 
-/* ───── EMBED (CLEAN) ───── */
+/* ───── EMBED ───── */
 
 function createEmbed(event) {
 
@@ -69,6 +69,7 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 
+  /* ───── SLASH ───── */
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === 'капт') {
@@ -83,10 +84,9 @@ client.on(Events.InteractionCreate, async interaction => {
         date,
         max,
         users: [],
-        closed: false
+        closed: false,
+        messageId: null
       };
-
-      save();
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -102,23 +102,21 @@ client.on(Events.InteractionCreate, async interaction => {
           .setStyle(ButtonStyle.Danger),
 
         new ButtonBuilder()
-          .setCustomId(`edit_${id}`)
-          .setLabel('Изменить')
-          .setEmoji('✏️')
-          .setStyle(ButtonStyle.Secondary),
-
-        new ButtonBuilder()
           .setCustomId(`close_${id}`)
           .setLabel('Закрыть')
           .setEmoji('🔒')
           .setStyle(ButtonStyle.Secondary)
       );
 
-      await interaction.reply({
+      const msg = await interaction.reply({
         content: `<@&${ROLE_ID}>`,
         embeds: [createEmbed(eventsData[id])],
-        components: [row]
+        components: [row],
+        fetchReply: true
       });
+
+      eventsData[id].messageId = msg.id;
+      save();
     }
   }
 
@@ -130,6 +128,9 @@ client.on(Events.InteractionCreate, async interaction => {
     const event = eventsData[id];
     if (!event) return;
 
+    const channel = interaction.channel;
+
+    /* JOIN */
     if (action === 'join') {
 
       if (event.closed)
@@ -155,16 +156,22 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.showModal(modal);
     }
 
+    /* LEAVE (🔥 ВЫХОД ИЗ СПИСКА) */
     if (action === 'leave') {
 
       event.users = event.users.filter(u => u.id !== interaction.user.id);
       save();
 
-      return interaction.update({
-        embeds: [createEmbed(event)]
+      const msg = await channel.messages.fetch(event.messageId);
+      await msg.edit({ embeds: [createEmbed(event)] });
+
+      return interaction.reply({
+        content: '🚪 Ты вышел из списка',
+        ephemeral: true
       });
     }
 
+    /* CLOSE */
     if (action === 'close') {
 
       if (interaction.user.id !== event.owner)
@@ -173,33 +180,20 @@ client.on(Events.InteractionCreate, async interaction => {
       event.closed = true;
       save();
 
-      return interaction.update({
+      const msg = await channel.messages.fetch(event.messageId);
+      await msg.edit({
         embeds: [createEmbed(event)],
         components: []
       });
-    }
 
-    if (action === 'edit') {
-
-      if (interaction.user.id !== event.owner)
-        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
-
-      const modal = new ModalBuilder()
-        .setCustomId(`editmodal_${id}`)
-        .setTitle('Изменить дату');
-
-      const input = new TextInputBuilder()
-        .setCustomId('date')
-        .setLabel('Новая дата')
-        .setStyle(TextInputStyle.Short);
-
-      modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-      return interaction.showModal(modal);
+      return interaction.reply({
+        content: '🔒 Набор закрыт',
+        ephemeral: true
+      });
     }
   }
 
-  /* ───── MODALS ───── */
+  /* ───── MODAL JOIN ───── */
 
   if (interaction.isModalSubmit()) {
 
@@ -208,36 +202,27 @@ client.on(Events.InteractionCreate, async interaction => {
       const id = interaction.customId.split('_')[1];
       const event = eventsData[id];
 
+      const nick = interaction.fields.getTextInputValue('nick');
+
       event.users.push({
         id: interaction.user.id,
-        nick: interaction.fields.getTextInputValue('nick')
+        nick
       });
 
       save();
 
-      return interaction.reply({
-        content: 'Ты добавлен в список',
-        ephemeral: true
-      });
-    }
-
-    if (interaction.customId.startsWith('editmodal_')) {
-
-      const id = interaction.customId.split('_')[1];
-      const event = eventsData[id];
-
-      event.date = interaction.fields.getTextInputValue('date');
-      save();
+      const msg = await interaction.channel.messages.fetch(event.messageId);
+      await msg.edit({ embeds: [createEmbed(event)] });
 
       return interaction.reply({
-        content: 'Дата обновлена',
+        content: '✅ Ты добавлен в список',
         ephemeral: true
       });
     }
   }
 });
 
-/* ───── COMMANDS ───── */
+/* ───── COMMAND REGISTER ───── */
 
 const commands = [
   new SlashCommandBuilder()
