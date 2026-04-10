@@ -27,38 +27,7 @@ const client = new Client({
 
 let eventsData = {};
 
-/* ─────────────────────────────
-   💎 PREMIUM STYLE FUNCTIONS
-───────────────────────────── */
-
-function toSmallCaps(text) {
-  const map = {
-    a:'ᴀ',b:'ʙ',c:'ᴄ',d:'ᴅ',e:'ᴇ',f:'ғ',
-    g:'ɢ',h:'ʜ',i:'ɪ',j:'ᴊ',k:'ᴋ',l:'ʟ',
-    m:'ᴍ',n:'ɴ',o:'ᴏ',p:'ᴘ',q:'ǫ',r:'ʀ',
-    s:'s',t:'ᴛ',u:'ᴜ',v:'ᴠ',w:'ᴡ',x:'x',
-    y:'ʏ',z:'ᴢ'
-  };
-
-  return text.toLowerCase().split('').map(c => map[c] || c).join('');
-}
-
-function randomColor() {
-  const colors = [
-    0x2b2d31, // dark
-    0x5865f2, // discord blurple
-    0x57f287, // green
-    0xed4245, // red
-    0xf1c40f, // yellow
-    0x9b59b6, // purple
-    0x00b0f4  // blue
-  ];
-  return colors[Math.floor(Math.random() * colors.length)];
-}
-
-/* ─────────────────────────────
-   💾 SAVE / LOAD
-───────────────────────────── */
+/* ───────── LOAD DATA ───────── */
 
 if (fs.existsSync('data.json')) {
   eventsData = JSON.parse(fs.readFileSync('data.json'));
@@ -68,44 +37,37 @@ function save() {
   fs.writeFileSync('data.json', JSON.stringify(eventsData, null, 2));
 }
 
-/* ─────────────────────────────
-   💎 EMBED DESIGN (PREMIUM)
-───────────────────────────── */
+/* ───────── EMBED ───────── */
 
 function createEmbed(event) {
 
-  let list = event.users
+  const list = event.users
     .map((u, i) =>
       `${i === 0 ? '👑' : '▫️'} <@${u.id}> • ${u.nick}`
     )
     .join('\n');
 
   return new EmbedBuilder()
-    .setColor(randomColor())
-    .setTitle(toSmallCaps('🔥 КАПТ СИСТЕМА'))
+    .setColor(0x5865f2)
+    .setTitle('Inspire Bot System')
     .setDescription(
       `👤 **Создатель:** <@${event.owner}>\n` +
       `📅 **Дата:** \`${event.date}\`\n` +
       `👥 **Лимит:** \`${event.max}\`\n\n` +
-      `━━━━━━━━━━━━━━━━━━\n` +
       `👥 **Участники (${event.users.length}/${event.max})**\n\n` +
-      `${list || 'Пока никого нет 😴'}`
+      `${list || 'Пока никого нет'}`
     )
-    .setFooter({ text: 'Premium Event System • Discord Bot' })
+    .setFooter({ text: 'Inspire Bot System' })
     .setTimestamp();
 }
 
-/* ─────────────────────────────
-   🚀 READY
-───────────────────────────── */
+/* ───────── READY ───────── */
 
 client.once(Events.ClientReady, () => {
   console.log(`Бот запущен как ${client.user.tag}`);
 });
 
-/* ─────────────────────────────
-   🎯 INTERACTIONS
-───────────────────────────── */
+/* ───────── INTERACTIONS ───────── */
 
 client.on(Events.InteractionCreate, async interaction => {
 
@@ -133,30 +95,26 @@ client.on(Events.InteractionCreate, async interaction => {
         new ButtonBuilder()
           .setCustomId(`join_${id}`)
           .setLabel('Присоединиться')
-          .setStyle(ButtonStyle.Success)
-          .setEmoji('➕'),
+          .setStyle(ButtonStyle.Success),
 
         new ButtonBuilder()
           .setCustomId(`leave_${id}`)
           .setLabel('Выйти')
-          .setStyle(ButtonStyle.Danger)
-          .setEmoji('🚪'),
+          .setStyle(ButtonStyle.Danger),
 
         new ButtonBuilder()
           .setCustomId(`edit_${id}`)
           .setLabel('Изменить')
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji('✏️'),
+          .setStyle(ButtonStyle.Secondary),
 
         new ButtonBuilder()
           .setCustomId(`close_${id}`)
           .setLabel('Закрыть')
           .setStyle(ButtonStyle.Secondary)
-          .setEmoji('🔒')
       );
 
       await interaction.reply({
-        content: toSmallCaps(`<@&${ROLE_ID}> 🔥 новый капт`),
+        content: `<@&${ROLE_ID}>`,
         embeds: [createEmbed(eventsData[id])],
         components: [row]
       });
@@ -174,13 +132,13 @@ client.on(Events.InteractionCreate, async interaction => {
     if (action === 'join') {
 
       if (event.closed)
-        return interaction.reply({ content: '🔒 Набор закрыт', ephemeral: true });
+        return interaction.reply({ content: 'Набор закрыт', ephemeral: true });
 
       if (event.users.find(u => u.id === interaction.user.id))
-        return interaction.reply({ content: '❌ Ты уже в списке', ephemeral: true });
+        return interaction.reply({ content: 'Ты уже в списке', ephemeral: true });
 
       if (event.users.length >= event.max)
-        return interaction.reply({ content: '🚫 Мест нет', ephemeral: true });
+        return interaction.reply({ content: 'Мест нет', ephemeral: true });
 
       const modal = new ModalBuilder()
         .setCustomId(`modal_${id}`)
@@ -188,9 +146,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
       const input = new TextInputBuilder()
         .setCustomId('nick')
-        .setLabel('Ваш игровой ник')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+        .setLabel('Ваш ник')
+        .setStyle(TextInputStyle.Short);
 
       modal.addComponents(new ActionRowBuilder().addComponents(input));
 
@@ -199,6 +156,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     /* LEAVE */
     if (action === 'leave') {
+
       event.users = event.users.filter(u => u.id !== interaction.user.id);
       save();
 
@@ -211,7 +169,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (action === 'close') {
 
       if (interaction.user.id !== event.owner)
-        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
+        return interaction.reply({ content: 'Только создатель', ephemeral: true });
 
       event.closed = true;
       save();
@@ -226,15 +184,15 @@ client.on(Events.InteractionCreate, async interaction => {
     if (action === 'edit') {
 
       if (interaction.user.id !== event.owner)
-        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
+        return interaction.reply({ content: 'Только создатель', ephemeral: true });
 
       const modal = new ModalBuilder()
         .setCustomId(`editmodal_${id}`)
-        .setTitle('Изменить дату');
+        .setTitle('Изменить');
 
       const input = new TextInputBuilder()
         .setCustomId('date')
-        .setLabel('Новая дата/время')
+        .setLabel('Новая дата')
         .setStyle(TextInputStyle.Short);
 
       modal.addComponents(new ActionRowBuilder().addComponents(input));
@@ -259,7 +217,7 @@ client.on(Events.InteractionCreate, async interaction => {
       save();
 
       return interaction.reply({
-        content: '✅ Ты добавлен!',
+        content: 'Ты добавлен в список',
         ephemeral: true
       });
     }
@@ -273,21 +231,19 @@ client.on(Events.InteractionCreate, async interaction => {
       save();
 
       return interaction.reply({
-        content: '✏️ Дата обновлена!',
+        content: 'Дата обновлена',
         ephemeral: true
       });
     }
   }
 });
 
-/* ─────────────────────────────
-   📌 SLASH COMMAND REGISTER
-───────────────────────────── */
+/* ───────── COMMAND REGISTER ───────── */
 
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
-    .setDescription('Создать капт')
+    .setDescription('Создать событие')
     .addStringOption(opt =>
       opt.setName('дата')
         .setDescription('Дата и время')
