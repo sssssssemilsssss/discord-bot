@@ -27,7 +27,7 @@ const client = new Client({
 
 let eventsData = {};
 
-/* ───────── LOAD DATA ───────── */
+/* ───── DATA ───── */
 
 if (fs.existsSync('data.json')) {
   eventsData = JSON.parse(fs.readFileSync('data.json'));
@@ -37,7 +37,7 @@ function save() {
   fs.writeFileSync('data.json', JSON.stringify(eventsData, null, 2));
 }
 
-/* ───────── EMBED ───────── */
+/* ───── EMBED (CLEAN) ───── */
 
 function createEmbed(event) {
 
@@ -49,7 +49,6 @@ function createEmbed(event) {
 
   return new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle('Inspire Bot System')
     .setDescription(
       `👤 **Создатель:** <@${event.owner}>\n` +
       `📅 **Дата:** \`${event.date}\`\n` +
@@ -57,21 +56,19 @@ function createEmbed(event) {
       `👥 **Участники (${event.users.length}/${event.max})**\n\n` +
       `${list || 'Пока никого нет'}`
     )
-    .setFooter({ text: 'Inspire Bot System' })
     .setTimestamp();
 }
 
-/* ───────── READY ───────── */
+/* ───── READY ───── */
 
 client.once(Events.ClientReady, () => {
   console.log(`Бот запущен как ${client.user.tag}`);
 });
 
-/* ───────── INTERACTIONS ───────── */
+/* ───── INTERACTIONS ───── */
 
 client.on(Events.InteractionCreate, async interaction => {
 
-  /* ───── SLASH COMMAND ───── */
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === 'капт') {
@@ -95,21 +92,25 @@ client.on(Events.InteractionCreate, async interaction => {
         new ButtonBuilder()
           .setCustomId(`join_${id}`)
           .setLabel('Присоединиться')
+          .setEmoji('➕')
           .setStyle(ButtonStyle.Success),
 
         new ButtonBuilder()
           .setCustomId(`leave_${id}`)
           .setLabel('Выйти')
+          .setEmoji('🚪')
           .setStyle(ButtonStyle.Danger),
 
         new ButtonBuilder()
           .setCustomId(`edit_${id}`)
           .setLabel('Изменить')
+          .setEmoji('✏️')
           .setStyle(ButtonStyle.Secondary),
 
         new ButtonBuilder()
           .setCustomId(`close_${id}`)
           .setLabel('Закрыть')
+          .setEmoji('🔒')
           .setStyle(ButtonStyle.Secondary)
       );
 
@@ -122,23 +123,23 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   /* ───── BUTTONS ───── */
+
   if (interaction.isButton()) {
 
     const [action, id] = interaction.customId.split('_');
     const event = eventsData[id];
     if (!event) return;
 
-    /* JOIN */
     if (action === 'join') {
 
       if (event.closed)
-        return interaction.reply({ content: 'Набор закрыт', ephemeral: true });
+        return interaction.reply({ content: '🔒 Набор закрыт', ephemeral: true });
 
       if (event.users.find(u => u.id === interaction.user.id))
-        return interaction.reply({ content: 'Ты уже в списке', ephemeral: true });
+        return interaction.reply({ content: '❌ Ты уже в списке', ephemeral: true });
 
       if (event.users.length >= event.max)
-        return interaction.reply({ content: 'Мест нет', ephemeral: true });
+        return interaction.reply({ content: '🚫 Мест нет', ephemeral: true });
 
       const modal = new ModalBuilder()
         .setCustomId(`modal_${id}`)
@@ -154,7 +155,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.showModal(modal);
     }
 
-    /* LEAVE */
     if (action === 'leave') {
 
       event.users = event.users.filter(u => u.id !== interaction.user.id);
@@ -165,11 +165,10 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    /* CLOSE */
     if (action === 'close') {
 
       if (interaction.user.id !== event.owner)
-        return interaction.reply({ content: 'Только создатель', ephemeral: true });
+        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
 
       event.closed = true;
       save();
@@ -180,15 +179,14 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    /* EDIT */
     if (action === 'edit') {
 
       if (interaction.user.id !== event.owner)
-        return interaction.reply({ content: 'Только создатель', ephemeral: true });
+        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
 
       const modal = new ModalBuilder()
         .setCustomId(`editmodal_${id}`)
-        .setTitle('Изменить');
+        .setTitle('Изменить дату');
 
       const input = new TextInputBuilder()
         .setCustomId('date')
@@ -202,6 +200,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   /* ───── MODALS ───── */
+
   if (interaction.isModalSubmit()) {
 
     if (interaction.customId.startsWith('modal_')) {
@@ -238,7 +237,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-/* ───────── COMMAND REGISTER ───────── */
+/* ───── COMMANDS ───── */
 
 const commands = [
   new SlashCommandBuilder()
