@@ -27,7 +27,7 @@ const client = new Client({
 
 let eventsData = {};
 
-/* ───── LOAD DATA ───── */
+/* ───── LOAD ───── */
 
 if (fs.existsSync('data.json')) {
   eventsData = JSON.parse(fs.readFileSync('data.json'));
@@ -37,7 +37,7 @@ function save() {
   fs.writeFileSync('data.json', JSON.stringify(eventsData, null, 2));
 }
 
-/* ───── EMBED (БЕЗ ТАЙМЕРА) ───── */
+/* ───── EMBED ───── */
 
 function createEmbed(event) {
 
@@ -48,7 +48,7 @@ function createEmbed(event) {
     .join('\n');
 
   return new EmbedBuilder()
-    .setColor(0x5865f2)
+    .setColor(0xf0000)
     .setDescription(
       `👤 **Создатель:** <@${event.owner}>\n` +
       `📅 **Дата:** \`${event.date}\`\n` +
@@ -68,8 +68,6 @@ client.once(Events.ClientReady, () => {
 /* ───── INTERACTIONS ───── */
 
 client.on(Events.InteractionCreate, async interaction => {
-
-  /* ───── SLASH COMMAND ───── */
 
   if (interaction.isChatInputCommand()) {
 
@@ -137,7 +135,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
     const channel = interaction.channel;
 
-    /* JOIN */
     if (action === 'join') {
 
       if (event.closed)
@@ -163,7 +160,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.showModal(modal);
     }
 
-    /* LEAVE */
     if (action === 'leave') {
 
       event.users = event.users.filter(u => u.id !== interaction.user.id);
@@ -178,7 +174,6 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    /* CLOSE */
     if (action === 'close') {
 
       if (interaction.user.id !== event.owner)
@@ -199,7 +194,6 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    /* EDIT */
     if (action === 'edit') {
 
       if (interaction.user.id !== event.owner)
@@ -224,7 +218,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.isModalSubmit()) {
 
-    /* JOIN */
     if (interaction.customId.startsWith('modal_')) {
 
       const id = interaction.customId.split('_')[1];
@@ -246,14 +239,12 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    /* EDIT */
     if (interaction.customId.startsWith('editmodal_')) {
 
       const id = interaction.customId.split('_')[1];
       const event = eventsData[id];
 
       event.date = interaction.fields.getTextInputValue('date');
-
       save();
 
       const msg = await interaction.channel.messages.fetch(event.messageId);
@@ -286,10 +277,25 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 (async () => {
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
+  try {
+    console.log('Обновление команд...');
+
+    // ⚡ мгновенно (основной сервер)
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
+
+    // 🌍 глобально (все серверы)
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log('Команды зарегистрированы');
+  } catch (err) {
+    console.error(err);
+  }
 })();
 
 client.login(TOKEN);
