@@ -112,6 +112,8 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 
+  /* ───── КОМАНДА ───── */
+
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === 'капт') {
@@ -132,7 +134,7 @@ client.on(Events.InteractionCreate, async interaction => {
         messageId: null
       };
 
-      const row = new ActionRowBuilder().addComponents(
+      const mainRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`join_${id}`)
           .setLabel('➕ Присоединиться')
@@ -152,7 +154,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const msg = await interaction.reply({
         content: `<@&${ROLE_ID}>`,
         embeds: [createEmbed(eventsData[id])],
-        components: [row],
+        components: [mainRow],
         fetchReply: true
       });
 
@@ -161,13 +163,14 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  /* ───── BUTTONS ───── */
+  /* ───── КНОПКИ ───── */
 
   if (interaction.isButton()) {
 
     const parts = interaction.customId.split('_');
     const action = parts[0];
     const id = parts[1];
+
     const event = eventsData[id];
     if (!event) return;
 
@@ -203,6 +206,7 @@ client.on(Events.InteractionCreate, async interaction => {
       save();
 
       const msg = await channel.messages.fetch(event.messageId);
+
       await msg.edit({
         embeds: [createEmbed(event)],
         components: [
@@ -221,8 +225,8 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
 
       const index = parseInt(parts[2]);
-      const user = event.users[index];
-      if (!user) return;
+      const removedUser = event.users[index];
+      if (!removedUser) return;
 
       event.users.splice(index, 1);
       save();
@@ -237,14 +241,23 @@ client.on(Events.InteractionCreate, async interaction => {
         ]
       });
 
-      return interaction.reply({
-        content: `❌ Ты был удалён из списка`,
+      // сообщение удалённому
+      await interaction.reply({
+        content: `❌ <@${removedUser.id}> был удалён из списка`,
         ephemeral: true
       });
+
+      // попытка уведомить его
+      try {
+        const user = await client.users.fetch(removedUser.id);
+        await user.send('❌ Ты был удалён из списка капта');
+      } catch {}
+
+      return;
     }
   }
 
-  /* ───── MODALS ───── */
+  /* ───── МОДАЛКА ───── */
 
   if (interaction.isModalSubmit()) {
 
@@ -278,32 +291,46 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-/* ───── COMMANDS ───── */
+/* ───── КОМАНДЫ ───── */
 
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
     .setDescription('Создать капт')
     .addStringOption(opt =>
-      opt.setName('название').setRequired(true))
+      opt.setName('название')
+        .setDescription('Название')
+        .setRequired(true))
     .addStringOption(opt =>
-      opt.setName('дата').setRequired(true))
+      opt.setName('дата')
+        .setDescription('Дата')
+        .setRequired(true))
     .addIntegerOption(opt =>
-      opt.setName('колво').setRequired(true))
+      opt.setName('колво')
+        .setDescription('Количество')
+        .setRequired(true))
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 (async () => {
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
+  try {
+    console.log('Регистрация команд...');
 
-  await rest.put(
-    Routes.applicationCommands(CLIENT_ID),
-    { body: commands }
-  );
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
+
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log('Команды готовы');
+  } catch (err) {
+    console.error(err);
+  }
 })();
 
 client.login(TOKEN);
