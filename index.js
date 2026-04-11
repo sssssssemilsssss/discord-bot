@@ -32,7 +32,14 @@ const images = [
   'https://i.imgur.com/gTlqFJh.png',
   'https://i.imgur.com/f1zyGkj.png',
   'https://i.imgur.com/pyNF0UG.png',
-  'https://i.imgur.com/2ejrfV6.png'
+  'https://i.imgur.com/2ejrfV6.png',
+  'https://i.imgur.com/YfPP6it.png',
+  'https://i.imgur.com/oggdLuG.png',
+  'https://i.imgur.com/DmL9o1A.png',
+  'https://i.imgur.com/gc83lhM.png',
+  'https://i.imgur.com/X9FIRej.png',
+  'https://i.imgur.com/9zZB3QL.png',
+  'https://i.imgur.com/1WE9L9E.png'
 ];
 
 function getRandomImage() {
@@ -61,8 +68,17 @@ function createEmbed(event) {
     )
     .join('\n');
 
+  // 🎨 ЛОГИКА ЦВЕТА
+  let color = 0x00ff00; // зелёный
+
+  if (event.users.length >= event.max) {
+    color = 0xff0000; // красный (фулл)
+  } else if (event.users.length >= Math.ceil(event.max * 0.7)) {
+    color = 0xffff00; // жёлтый (почти фулл)
+  }
+
   return new EmbedBuilder()
-    .setColor(0xff0000)
+    .setColor(color)
     .setDescription(
       `# ${event.title}\n\n` +
       `**Создал:** <@${event.owner}>\n` +
