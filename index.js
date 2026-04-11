@@ -32,14 +32,7 @@ const images = [
   'https://i.imgur.com/gTlqFJh.png',
   'https://i.imgur.com/f1zyGkj.png',
   'https://i.imgur.com/pyNF0UG.png',
-  'https://i.imgur.com/2ejrfV6.png',
-  'https://i.imgur.com/YfPP6it.png',
-  'https://i.imgur.com/oggdLuG.png',
-  'https://i.imgur.com/DmL9o1A.png',
-  'https://i.imgur.com/gc83lhM.png',
-  'https://i.imgur.com/X9FIRej.png',
-  'https://i.imgur.com/9zZB3QL.png',
-  'https://i.imgur.com/1WE9L9E.png'
+  'https://i.imgur.com/2ejrfV6.png'
 ];
 
 function getRandomImage() {
@@ -64,18 +57,14 @@ function createEmbed(event) {
 
   const list = event.users
     .map((u, i) =>
-      `${i === 0 ? '👑' : '▫️'} <@${u.id}> • ${u.nick}`
+      `${i === 0 ? '👑' : '▫️'} ${i + 1}. <@${u.id}> • ${u.nick}`
     )
     .join('\n');
 
-  // 🎨 ЛОГИКА ЦВЕТА
-  let color = 0x00ff00; // зелёный
+  let color = 0x00ff00;
 
-  if (event.users.length >= event.max) {
-    color = 0xff0000; // красный (фулл)
-  } else if (event.users.length >= Math.ceil(event.max * 0.7)) {
-    color = 0xffff00; // жёлтый (почти фулл)
-  }
+  if (event.users.length >= event.max) color = 0xff0000;
+  else if (event.users.length >= Math.ceil(event.max * 0.7)) color = 0xffff00;
 
   return new EmbedBuilder()
     .setColor(color)
@@ -88,6 +77,29 @@ function createEmbed(event) {
     )
     .setImage(getRandomImage())
     .setTimestamp();
+}
+
+/* ───── КНОПКИ УДАЛЕНИЯ ───── */
+
+function createKickButtons(eventId, users) {
+  const rows = [];
+
+  for (let i = 0; i < users.length; i += 5) {
+    const row = new ActionRowBuilder();
+
+    users.slice(i, i + 5).forEach((u, index) => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`kick_${eventId}_${i + index}`)
+          .setLabel(`❌ ${i + index + 1}`)
+          .setStyle(ButtonStyle.Danger)
+      );
+    });
+
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 /* ───── READY ───── */
@@ -123,26 +135,17 @@ client.on(Events.InteractionCreate, async interaction => {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`join_${id}`)
-          .setLabel('Присоединиться')
-          .setEmoji('➕')
+          .setLabel('➕ Присоединиться')
           .setStyle(ButtonStyle.Success),
 
         new ButtonBuilder()
           .setCustomId(`leave_${id}`)
-          .setLabel('Выйти')
-          .setEmoji('🚪')
-          .setStyle(ButtonStyle.Danger),
-
-        new ButtonBuilder()
-          .setCustomId(`edit_${id}`)
-          .setLabel('Изменить')
-          .setEmoji('✏️')
-          .setStyle(ButtonStyle.Primary),
+          .setLabel('🚪 Выйти')
+          .setStyle(ButtonStyle.Secondary),
 
         new ButtonBuilder()
           .setCustomId(`close_${id}`)
-          .setLabel('Закрыть')
-          .setEmoji('🔒')
+          .setLabel('🔒 Закрыть')
           .setStyle(ButtonStyle.Secondary)
       );
 
@@ -162,22 +165,22 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.isButton()) {
 
-    const [action, id] = interaction.customId.split('_');
+    const parts = interaction.customId.split('_');
+    const action = parts[0];
+    const id = parts[1];
     const event = eventsData[id];
     if (!event) return;
 
     const channel = interaction.channel;
 
+    /* JOIN */
     if (action === 'join') {
-
-      if (event.closed)
-        return interaction.reply({ content: '🔒 Набор закрыт', ephemeral: true });
-
-      if (event.users.find(u => u.id === interaction.user.id))
-        return interaction.reply({ content: '❌ Ты уже в списке', ephemeral: true });
 
       if (event.users.length >= event.max)
         return interaction.reply({ content: '🚫 Мест нет', ephemeral: true });
+
+      if (event.users.find(u => u.id === interaction.user.id))
+        return interaction.reply({ content: '❌ Ты уже в списке', ephemeral: true });
 
       const modal = new ModalBuilder()
         .setCustomId(`modal_${id}`)
@@ -193,51 +196,51 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.showModal(modal);
     }
 
+    /* LEAVE */
     if (action === 'leave') {
 
       event.users = event.users.filter(u => u.id !== interaction.user.id);
       save();
 
       const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
+      await msg.edit({
+        embeds: [createEmbed(event)],
+        components: [
+          msg.components[0],
+          ...createKickButtons(id, event.users)
+        ]
+      });
 
       return interaction.reply({ content: '🚪 Ты вышел', ephemeral: true });
     }
 
-    if (action === 'close') {
+    /* KICK */
+    if (action === 'kick') {
 
       if (interaction.user.id !== event.owner)
         return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
 
-      event.closed = true;
+      const index = parseInt(parts[2]);
+      const user = event.users[index];
+      if (!user) return;
+
+      event.users.splice(index, 1);
       save();
 
       const msg = await channel.messages.fetch(event.messageId);
+
       await msg.edit({
         embeds: [createEmbed(event)],
-        components: []
+        components: [
+          msg.components[0],
+          ...createKickButtons(id, event.users)
+        ]
       });
 
-      return interaction.reply({ content: '🔒 Закрыто', ephemeral: true });
-    }
-
-    if (action === 'edit') {
-
-      if (interaction.user.id !== event.owner)
-        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
-
-      const modal = new ModalBuilder()
-        .setCustomId(`editmodal_${id}`)
-        .setTitle('Изменить дату');
-
-      const input = new TextInputBuilder()
-        .setCustomId('date')
-        .setLabel('Новая дата')
-        .setStyle(TextInputStyle.Short);
-
-      modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-      return interaction.showModal(modal);
+      return interaction.reply({
+        content: `❌ Ты был удалён из списка`,
+        ephemeral: true
+      });
     }
   }
 
@@ -258,23 +261,19 @@ client.on(Events.InteractionCreate, async interaction => {
       save();
 
       const msg = await interaction.channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
 
-      return interaction.reply({ content: '✅ Добавлен', ephemeral: true });
-    }
+      await msg.edit({
+        embeds: [createEmbed(event)],
+        components: [
+          msg.components[0],
+          ...createKickButtons(id, event.users)
+        ]
+      });
 
-    if (interaction.customId.startsWith('editmodal_')) {
-
-      const id = interaction.customId.split('_')[1];
-      const event = eventsData[id];
-
-      event.date = interaction.fields.getTextInputValue('date');
-      save();
-
-      const msg = await interaction.channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
-
-      return interaction.reply({ content: '✏️ Обновлено', ephemeral: true });
+      return interaction.reply({
+        content: '✅ Ты добавлен',
+        ephemeral: true
+      });
     }
   }
 });
@@ -286,17 +285,11 @@ const commands = [
     .setName('капт')
     .setDescription('Создать капт')
     .addStringOption(opt =>
-      opt.setName('название')
-        .setDescription('Название капта')
-        .setRequired(true))
+      opt.setName('название').setRequired(true))
     .addStringOption(opt =>
-      opt.setName('дата')
-        .setDescription('Дата')
-        .setRequired(true))
+      opt.setName('дата').setRequired(true))
     .addIntegerOption(opt =>
-      opt.setName('колво')
-        .setDescription('Количество')
-        .setRequired(true))
+      opt.setName('колво').setRequired(true))
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
