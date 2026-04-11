@@ -19,7 +19,6 @@ const fs = require('fs');
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1438878652250198069';
 const GUILD_ID = '1073591307487948833';
-const ROLE_ID = '1266795778429681746';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -40,8 +39,6 @@ function getRandomImage() {
 }
 
 let eventsData = {};
-
-/* ───── LOAD ───── */
 
 if (fs.existsSync('data.json')) {
   eventsData = JSON.parse(fs.readFileSync('data.json'));
@@ -151,8 +148,12 @@ client.on(Events.InteractionCreate, async interaction => {
           .setStyle(ButtonStyle.Secondary)
       );
 
-      const msg = await interaction.reply({
-        content: `<@&${ROLE_ID}>`,
+      // 🔔 отдельный тег everyone
+      await interaction.reply({
+        content: '@everyone'
+      });
+
+      const msg = await interaction.followUp({
         embeds: [createEmbed(eventsData[id])],
         components: [mainRow],
         fetchReply: true
@@ -178,6 +179,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
     /* JOIN */
     if (action === 'join') {
+
+      if (event.closed)
+        return interaction.reply({ content: '🔒 Набор закрыт', ephemeral: true });
 
       if (event.users.length >= event.max)
         return interaction.reply({ content: '🚫 Мест нет', ephemeral: true });
@@ -218,6 +222,28 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.reply({ content: '🚪 Ты вышел', ephemeral: true });
     }
 
+    /* CLOSE */
+    if (action === 'close') {
+
+      if (interaction.user.id !== event.owner)
+        return interaction.reply({ content: '❌ Только создатель', ephemeral: true });
+
+      event.closed = true;
+      save();
+
+      const msg = await channel.messages.fetch(event.messageId);
+
+      await msg.edit({
+        embeds: [createEmbed(event)],
+        components: []
+      });
+
+      return interaction.reply({
+        content: '🔒 Капт закрыт',
+        ephemeral: true
+      });
+    }
+
     /* KICK */
     if (action === 'kick') {
 
@@ -241,19 +267,10 @@ client.on(Events.InteractionCreate, async interaction => {
         ]
       });
 
-      // сообщение удалённому
-      await interaction.reply({
-        content: `❌ <@${removedUser.id}> был удалён из списка`,
+      return interaction.reply({
+        content: '❌ Ты был удалён из списка',
         ephemeral: true
       });
-
-      // попытка уведомить его
-      try {
-        const user = await client.users.fetch(removedUser.id);
-        await user.send('❌ Ты был удалён из списка капта');
-      } catch {}
-
-      return;
     }
   }
 
@@ -314,23 +331,15 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 (async () => {
-  try {
-    console.log('Регистрация команд...');
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
 
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-
-    await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      { body: commands }
-    );
-
-    console.log('Команды готовы');
-  } catch (err) {
-    console.error(err);
-  }
+  await rest.put(
+    Routes.applicationCommands(CLIENT_ID),
+    { body: commands }
+  );
 })();
 
 client.login(TOKEN);
