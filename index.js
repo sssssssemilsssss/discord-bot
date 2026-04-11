@@ -43,22 +43,20 @@ function createEmbed(event) {
 
   const list = event.users
     .map((u, i) =>
-      `${i === 0 ? '👑' : '▫️'} <@${u.id}> • ${u.nick}`
+      `${i === 0 ? '👑' : '▫️'} <@${u.id}>`
     )
     .join('\n');
 
   return new EmbedBuilder()
-    .setColor(0xf0000)
+    .setColor(0xff0000) // 🔴 красная полоска
     .setDescription(
-      `👤 **Создатель:** <@${event.owner}>\n` +
-      `📅 **Дата:** \`${event.date}\`\n` +
-      `👥 **Лимит:** \`${event.max}\`\n\n` +
-      `👥 **Участники (${event.users.length}/${event.max})**\n\n` +
+      `**Создал:** <@${event.owner}>\n` +
+      `**Дата:** ${event.date}\n\n` +
+      `**Участники (${event.users.length}/${event.max})**\n\n` +
       `${list || 'Пока никого нет'}`
     )
     .setTimestamp();
 }
-
 /* ───── READY ───── */
 
 client.once(Events.ClientReady, () => {
