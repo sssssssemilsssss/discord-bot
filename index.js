@@ -56,20 +56,21 @@ function save() {
 function createEmbed(event) {
 
   const list = event.users
-  .map((u, i) =>
-    `${i === 0 ? '👑' : '▫️'} <@${u.id}> • ${u.nick}`
-  )
-  .join('\n');
+    .map((u, i) =>
+      `${i === 0 ? '👑' : '▫️'} <@${u.id}> • ${u.nick}`
+    )
+    .join('\n');
 
   return new EmbedBuilder()
-    .setColor(0xff0000) // 🔴 красный
+    .setColor(0xff0000)
     .setDescription(
+      `# ${event.title}\n\n` +
       `**Создал:** <@${event.owner}>\n` +
       `**Дата:** ${event.date}\n\n` +
       `**Участники (${event.users.length}/${event.max})**\n\n` +
       `${list || 'Пока никого нет'}`
     )
-    .setImage(getRandomImage()) // 🖼️ картинка в embed
+    .setImage(getRandomImage())
     .setTimestamp();
 }
 
@@ -87,6 +88,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.commandName === 'капт') {
 
+      const title = interaction.options.getString('название');
       const date = interaction.options.getString('дата');
       const max = interaction.options.getInteger('колво');
 
@@ -94,6 +96,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
       eventsData[id] = {
         owner: interaction.user.id,
+        title,
         date,
         max,
         users: [],
@@ -182,10 +185,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const msg = await channel.messages.fetch(event.messageId);
       await msg.edit({ embeds: [createEmbed(event)] });
 
-      return interaction.reply({
-        content: '🚪 Ты вышел',
-        ephemeral: true
-      });
+      return interaction.reply({ content: '🚪 Ты вышел', ephemeral: true });
     }
 
     if (action === 'close') {
@@ -202,10 +202,7 @@ client.on(Events.InteractionCreate, async interaction => {
         components: []
       });
 
-      return interaction.reply({
-        content: '🔒 Закрыто',
-        ephemeral: true
-      });
+      return interaction.reply({ content: '🔒 Закрыто', ephemeral: true });
     }
 
     if (action === 'edit') {
@@ -247,10 +244,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const msg = await interaction.channel.messages.fetch(event.messageId);
       await msg.edit({ embeds: [createEmbed(event)] });
 
-      return interaction.reply({
-        content: '✅ Добавлен',
-        ephemeral: true
-      });
+      return interaction.reply({ content: '✅ Добавлен', ephemeral: true });
     }
 
     if (interaction.customId.startsWith('editmodal_')) {
@@ -264,10 +258,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const msg = await interaction.channel.messages.fetch(event.messageId);
       await msg.edit({ embeds: [createEmbed(event)] });
 
-      return interaction.reply({
-        content: '✏️ Обновлено',
-        ephemeral: true
-      });
+      return interaction.reply({ content: '✏️ Обновлено', ephemeral: true });
     }
   }
 });
@@ -279,35 +270,31 @@ const commands = [
     .setName('капт')
     .setDescription('Создать капт')
     .addStringOption(opt =>
+      opt.setName('название')
+        .setDescription('Название капта')
+        .setRequired(true))
+    .addStringOption(opt =>
       opt.setName('дата')
-        .setDescription('Дата и время')
+        .setDescription('Дата')
         .setRequired(true))
     .addIntegerOption(opt =>
       opt.setName('колво')
-        .setDescription('Количество людей')
+        .setDescription('Количество')
         .setRequired(true))
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 (async () => {
-  try {
-    console.log('Обновление команд...');
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
 
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-
-    await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      { body: commands }
-    );
-
-    console.log('Команды готовы');
-  } catch (err) {
-    console.error(err);
-  }
+  await rest.put(
+    Routes.applicationCommands(CLIENT_ID),
+    { body: commands }
+  );
 })();
 
 client.login(TOKEN);
