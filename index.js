@@ -56,10 +56,10 @@ function save() {
 function createEmbed(event) {
 
   const list = event.users
-    .map((u, i) =>
-      `${i === 0 ? '👑' : '▫️'} <@${u.id}>`
-    )
-    .join('\n');
+  .map((u, i) =>
+    `${i === 0 ? '👑' : '▫️'} <@${u.id}> • ${u.nick}`
+  )
+  .join('\n');
 
   return new EmbedBuilder()
     .setColor(0xff0000) // 🔴 красный
