@@ -25,6 +25,20 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
+/* ───── КАРТИНКИ ───── */
+
+const images = [
+  'https://i.imgur.com/XVaHFVH.jpeg',
+  'https://i.imgur.com/gTlqFJh.png',
+  'https://i.imgur.com/f1zyGkj.png',
+  'https://i.imgur.com/pyNF0UG.png',
+  'https://i.imgur.com/2ejrfV6.png'
+];
+
+function getRandomImage() {
+  return images[Math.floor(Math.random() * images.length)];
+}
+
 let eventsData = {};
 
 /* ───── LOAD ───── */
@@ -48,15 +62,17 @@ function createEmbed(event) {
     .join('\n');
 
   return new EmbedBuilder()
-    .setColor(0xff0000) // 🔴 красная полоска
+    .setColor(0xff0000) // 🔴 красный
     .setDescription(
       `**Создал:** <@${event.owner}>\n` +
       `**Дата:** ${event.date}\n\n` +
       `**Участники (${event.users.length}/${event.max})**\n\n` +
       `${list || 'Пока никого нет'}`
     )
+    .setImage(getRandomImage()) // 🖼️ картинка в embed
     .setTimestamp();
 }
+
 /* ───── READY ───── */
 
 client.once(Events.ClientReady, () => {
@@ -167,7 +183,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await msg.edit({ embeds: [createEmbed(event)] });
 
       return interaction.reply({
-        content: '🚪 Ты вышел из списка',
+        content: '🚪 Ты вышел',
         ephemeral: true
       });
     }
@@ -187,7 +203,7 @@ client.on(Events.InteractionCreate, async interaction => {
       });
 
       return interaction.reply({
-        content: '🔒 Набор закрыт',
+        content: '🔒 Закрыто',
         ephemeral: true
       });
     }
@@ -232,7 +248,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await msg.edit({ embeds: [createEmbed(event)] });
 
       return interaction.reply({
-        content: '✅ Ты добавлен',
+        content: '✅ Добавлен',
         ephemeral: true
       });
     }
@@ -249,7 +265,7 @@ client.on(Events.InteractionCreate, async interaction => {
       await msg.edit({ embeds: [createEmbed(event)] });
 
       return interaction.reply({
-        content: '✏️ Дата обновлена',
+        content: '✏️ Обновлено',
         ephemeral: true
       });
     }
@@ -278,19 +294,17 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
     console.log('Обновление команд...');
 
-    // ⚡ мгновенно (основной сервер)
     await rest.put(
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
       { body: commands }
     );
 
-    // 🌍 глобально (все серверы)
     await rest.put(
       Routes.applicationCommands(CLIENT_ID),
       { body: commands }
     );
 
-    console.log('Команды зарегистрированы');
+    console.log('Команды готовы');
   } catch (err) {
     console.error(err);
   }
