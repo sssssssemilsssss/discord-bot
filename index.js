@@ -16,7 +16,7 @@ const {
 
 const fs = require('fs');
 
-/* ───── ENV ───── */
+/* ───── CONFIG ───── */
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1438878652250198069';
@@ -44,13 +44,9 @@ if (fs.existsSync('data.json')) {
   }
 }
 
-function save() {
-  try {
-    fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
-  } catch {}
-}
+const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
-/* ───── SAFE HELPERS ───── */
+/* ───── HELPERS ───── */
 
 async function safeFetch(channel, id) {
   try {
@@ -58,13 +54,6 @@ async function safeFetch(channel, id) {
   } catch {
     return null;
   }
-}
-
-async function safeEdit(msg, payload) {
-  try {
-    if (!msg) return;
-    await msg.edit(payload);
-  } catch {}
 }
 
 async function safeChannel(id) {
@@ -82,38 +71,35 @@ function captEmbed(e) {
 
   const list = users.length
     ? users.map((u, i) => `${i + 1}. <@${u.id}> • ${u.nick}`).join('\n')
-    : 'Пока никого нет';
+    : 'Пусто';
 
   return new EmbedBuilder()
     .setColor(0x00ff00)
     .setDescription(
       `# ${e.title}\n\n` +
       `**Создал:** <@${e.owner}>\n` +
-      `**Дата:** ${e.date}\n\n` +
+      `**Дата:** ${e.date}\n` +
+      `**Статус:** ${e.closed ? "🔴 Закрыт" : "🟢 Открыт"}\n\n` +
       `**Участники (${users.length}/${e.max})**\n\n` +
       list
     );
 }
 
 function famEmbed(e) {
-  const max = e.max || 0;
   const pos = e.positions || {};
 
   let text = '';
-
-  for (let i = 1; i <= max; i++) {
+  for (let i = 1; i <= e.max; i++) {
     const uid = Object.keys(pos).find(id => pos[id].pos === i);
-
-    if (!uid) text += `🟢 ${i} — свободно\n`;
-    else {
-      text += `🔴 ${i} — <@${uid}> | ${pos[uid].nick}\n`;
-    }
+    text += uid
+      ? `🔴 ${i} — <@${uid}> | ${pos[uid].nick}\n`
+      : `🟢 ${i} — свободно\n`;
   }
 
   return new EmbedBuilder()
     .setColor(0x2b2d31)
     .setTitle("Фам капт")
-    .setDescription(text || 'Пусто');
+    .setDescription(text);
 }
 
 /* ───── READY ───── */
@@ -131,7 +117,9 @@ client.on(Events.InteractionCreate, async (i) => {
 
     if (i.isChatInputCommand()) {
 
+      /* ─── CAPT ─── */
       if (i.commandName === 'капт') {
+
         const id = Date.now().toString();
 
         data[id] = {
@@ -141,12 +129,17 @@ client.on(Events.InteractionCreate, async (i) => {
           date: i.options.getString('дата'),
           max: i.options.getInteger('колво'),
           users: [],
-          messageId: null
+          closed: false,
+          messageId: null,
+          threadId: null
         };
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`edit_${id}`).setLabel('✏️').setStyle(ButtonStyle.Secondary)
         );
 
         const msg = await i.reply({
@@ -155,11 +148,20 @@ client.on(Events.InteractionCreate, async (i) => {
           fetchReply: true
         });
 
+        const thread = await msg.startThread({
+          name: "капт",
+          autoArchiveDuration: 60
+        });
+
         data[id].messageId = msg.id;
+        data[id].threadId = thread.id;
+
         save();
       }
 
+      /* ─── FAM CAPT ─── */
       if (i.commandName === 'фамкапт') {
+
         const id = Date.now().toString();
 
         data[id] = {
@@ -170,14 +172,17 @@ client.on(Events.InteractionCreate, async (i) => {
           max: i.options.getInteger('колво'),
           users: [],
           positions: {},
+          closed: false,
+          messageId: null,
           threadId: null,
-          threadMsgId: null,
-          messageId: null
+          threadMsgId: null
         };
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`fjoin_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`fpos_${id}`).setLabel('🎯').setStyle(ButtonStyle.Primary)
+          new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`edit_${id}`).setLabel('✏️').setStyle(ButtonStyle.Secondary)
         );
 
         const msg = await i.reply({
@@ -187,12 +192,17 @@ client.on(Events.InteractionCreate, async (i) => {
         });
 
         const thread = await msg.startThread({
-          name: "Фам капт",
+          name: "фам капт",
           autoArchiveDuration: 60
         });
 
         const tmsg = await thread.send({
-          embeds: [famEmbed(data[id])]
+          embeds: [famEmbed(data[id])],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`fpos_${id}`).setLabel('🎯 позиция').setStyle(ButtonStyle.Primary)
+            )
+          ]
         });
 
         data[id].messageId = msg.id;
@@ -211,10 +221,16 @@ client.on(Events.InteractionCreate, async (i) => {
       const e = data[id];
       if (!e) return;
 
+      const isOwner = i.user.id === e.owner;
+
+      /* ─ JOIN ─ */
       if (a === 'join' || a === 'fjoin') {
 
-        const modal = new ModalBuilder()
-          .setCustomId(`${a === 'join' ? 'nick' : 'fnick'}_${id}`)
+        if (e.closed)
+          return i.reply({ content: 'Закрыто', ephemeral: true });
+
+        const nickModal = new ModalBuilder()
+          .setCustomId(`nick_${id}`)
           .setTitle('Ник');
 
         const input = new TextInputBuilder()
@@ -222,21 +238,64 @@ client.on(Events.InteractionCreate, async (i) => {
           .setLabel('Введите ник')
           .setStyle(TextInputStyle.Short);
 
+        nickModal.addComponents(new ActionRowBuilder().addComponents(input));
+
+        return i.showModal(nickModal);
+      }
+
+      /* ─ REMOVE ─ */
+      if (a === 'remove') {
+        if (!isOwner)
+          return i.reply({ content: 'Нет прав', ephemeral: true });
+
+        const modal = new ModalBuilder()
+          .setCustomId(`remove_${id}`)
+          .setTitle('Удалить участника (номер)');
+
+        const input = new TextInputBuilder()
+          .setCustomId('num')
+          .setLabel('Введите номер участника')
+          .setStyle(TextInputStyle.Short);
+
         modal.addComponents(new ActionRowBuilder().addComponents(input));
 
         return i.showModal(modal);
       }
 
-      if (a === 'leave') {
-        e.users = e.users.filter(u => u.id !== i.user.id);
+      /* ─ CLOSE ─ */
+      if (a === 'close') {
+        if (!isOwner)
+          return i.reply({ content: 'Нет прав', ephemeral: true });
+
+        e.closed = !e.closed;
         save();
 
         const msg = await safeFetch(i.channel, e.messageId);
-        await safeEdit(msg, { embeds: [captEmbed(e)] });
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.deferUpdate();
+        return i.reply({ content: 'Статус изменён', ephemeral: true });
       }
 
+      /* ─ EDIT ─ */
+      if (a === 'edit') {
+        if (!isOwner)
+          return i.reply({ content: 'Нет прав', ephemeral: true });
+
+        const modal = new ModalBuilder()
+          .setCustomId(`edit_${id}`)
+          .setTitle('Изменить дату');
+
+        const input = new TextInputBuilder()
+          .setCustomId('date')
+          .setLabel('Новая дата/время')
+          .setStyle(TextInputStyle.Short);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+        return i.showModal(modal);
+      }
+
+      /* ─ FPOS BUTTON IN THREAD ─ */
       if (a === 'fpos') {
 
         const modal = new ModalBuilder()
@@ -262,50 +321,63 @@ client.on(Events.InteractionCreate, async (i) => {
       const e = data[id];
       if (!e) return i.reply({ content: 'Нет данных', ephemeral: true });
 
-      /* ── CAPT JOIN ── */
+      /* ─ JOIN ─ */
       if (t === 'nick') {
 
-        e.users.push({
-          id: i.user.id,
-          nick: i.fields.getTextInputValue('nick')
-        });
+        const nick = i.fields.getTextInputValue('nick');
 
+        e.users.push({ id: i.user.id, nick });
+        save();
+
+        const thread = await safeChannel(e.threadId);
+        await thread?.members.add(i.user.id).catch(() => {});
+
+        const msg = await safeFetch(i.channel, e.messageId);
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
+
+        return i.reply({ content: 'Добавлен', ephemeral: true });
+      }
+
+      /* ─ REMOVE ─ */
+      if (t === 'remove') {
+
+        const num = parseInt(i.fields.getTextInputValue('num'));
+        if (isNaN(num)) return i.reply({ content: 'Ошибка', ephemeral: true });
+
+        const user = e.users[num - 1];
+        if (!user) return i.reply({ content: 'Нет такого', ephemeral: true });
+
+        e.users.splice(num - 1, 1);
         save();
 
         const msg = await safeFetch(i.channel, e.messageId);
-        await safeEdit(msg, { embeds: [captEmbed(e)] });
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Ты добавлен', ephemeral: true });
+        return i.reply({ content: 'Удалён', ephemeral: true });
       }
 
-      /* ── FAM JOIN ── */
-      if (t === 'fnick') {
+      /* ─ EDIT DATE ─ */
+      if (t === 'edit') {
 
-        if (!e.users.find(x => x.id === i.user.id)) {
-          e.users.push({
-            id: i.user.id,
-            nick: i.fields.getTextInputValue('nick')
-          });
-        }
-
+        e.date = i.fields.getTextInputValue('date');
         save();
 
         const msg = await safeFetch(i.channel, e.messageId);
-        await safeEdit(msg, { embeds: [captEmbed(e)] });
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Ты добавлен', ephemeral: true });
+        return i.reply({ content: 'Обновлено', ephemeral: true });
       }
 
-      /* ── POSITION ── */
+      /* ─ FPOS ─ */
       if (t === 'fpos') {
 
         const pos = parseInt(i.fields.getTextInputValue('pos'));
 
         if (isNaN(pos) || pos < 1 || pos > e.max)
-          return i.reply({ content: 'Ошибка позиции', ephemeral: true });
+          return i.reply({ content: 'Ошибка', ephemeral: true });
 
-        if (Object.values(e.positions || {}).find(x => x.pos === pos))
-          return i.reply({ content: 'Уже занято', ephemeral: true });
+        if (Object.values(e.positions).find(x => x.pos === pos))
+          return i.reply({ content: 'Занято', ephemeral: true });
 
         e.positions[i.user.id] = {
           pos,
@@ -315,17 +387,11 @@ client.on(Events.InteractionCreate, async (i) => {
         save();
 
         const thread = await safeChannel(e.threadId);
+        const msg = await thread?.messages.fetch(e.threadMsgId);
 
-        const msg = await thread?.messages.fetch(e.threadMsgId).catch(() => null);
+        if (msg) await msg.edit({ embeds: [famEmbed(e)] });
 
-        if (msg) {
-          await msg.edit({ embeds: [famEmbed(e)] });
-        }
-
-        return i.reply({
-          content: `Позиция ${pos} занята`,
-          ephemeral: true
-        });
+        return i.reply({ content: `Позиция ${pos} занята`, ephemeral: true });
       }
     }
 
@@ -357,16 +423,12 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 (async () => {
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-  } catch (e) {
-    console.log("CMD ERROR:", e);
-  }
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
 })();
 
 /* ───── LOGIN ───── */
 
-client.login(TOKEN).catch(console.error);
+client.login(TOKEN);
