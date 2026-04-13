@@ -405,17 +405,41 @@ client.on(Events.InteractionCreate, async (i) => {
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
-    .setDescription('капт')
-    .addStringOption(o => o.setName('название').setRequired(true))
-    .addStringOption(o => o.setName('дата').setRequired(true))
-    .addIntegerOption(o => o.setName('колво').setRequired(true)),
+    .setDescription('Создать капт')
+    .addStringOption(o =>
+      o.setName('название')
+        .setDescription('Название')
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName('дата')
+        .setDescription('Дата')
+        .setRequired(true)
+    )
+    .addIntegerOption(o =>
+      o.setName('колво')
+        .setDescription('Количество')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('фамкапт')
-    .setDescription('фам капт')
-    .addStringOption(o => o.setName('название').setRequired(true))
-    .addStringOption(o => o.setName('дата').setRequired(true))
-    .addIntegerOption(o => o.setName('колво').setRequired(true))
+    .setDescription('Создать фам капт')
+    .addStringOption(o =>
+      o.setName('название')
+        .setDescription('Название')
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName('дата')
+        .setDescription('Дата')
+        .setRequired(true)
+    )
+    .addIntegerOption(o =>
+      o.setName('колво')
+        .setDescription('Количество')
+        .setRequired(true)
+    )
 ];
 
 /* ───── REGISTER ───── */
