@@ -41,7 +41,7 @@ function save() {
 
 /* ───── EMBEDS ───── */
 
-function createEmbed(event) {
+function createCaptEmbed(event) {
   const list = event.users.length
     ? event.users.map((u, i) => `${i + 1}. <@${u.id}> • ${u.nick}`).join('\n')
     : 'Пока никого нет';
@@ -59,14 +59,15 @@ function createEmbed(event) {
 }
 
 function createFamEmbed(event) {
+
   let text = '';
 
   for (let i = 1; i <= event.max; i++) {
-    const user = Object.keys(event.positions)
+    const userId = Object.keys(event.positions)
       .find(id => event.positions[id] === i);
 
-    text += user
-      ? `🔴 ${i} — <@${user}>\n`
+    text += userId
+      ? `🔴 ${i} — <@${userId}>\n`
       : `🟢 ${i} — свободно\n`;
   }
 
@@ -86,10 +87,10 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 
-  /* COMMANDS */
+  /* ───── COMMANDS ───── */
   if (interaction.isChatInputCommand()) {
 
-    /* /капт */
+    /* CAPT */
     if (interaction.commandName === 'капт') {
 
       const title = interaction.options.getString('название');
@@ -105,8 +106,7 @@ client.on(Events.InteractionCreate, async interaction => {
         date,
         max,
         users: [],
-        messageId: null,
-        closed: false
+        messageId: null
       };
 
       const row = new ActionRowBuilder().addComponents(
@@ -115,7 +115,7 @@ client.on(Events.InteractionCreate, async interaction => {
       );
 
       const msg = await interaction.reply({
-        embeds: [createEmbed(eventsData[id])],
+        embeds: [createCaptEmbed(eventsData[id])],
         components: [row],
         fetchReply: true
       });
@@ -124,7 +124,7 @@ client.on(Events.InteractionCreate, async interaction => {
       save();
     }
 
-    /* /фамкапт */
+    /* FAMCAPT */
     if (interaction.commandName === 'фамкапт') {
 
       const title = interaction.options.getString('название');
@@ -147,12 +147,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`fjoin_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`fleave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`fclear_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId(`fpos_${id}`).setLabel('🎯').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`fleave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary)
       );
 
       const msg = await interaction.reply({
-        embeds: [createEmbed(eventsData[id])],
+        embeds: [createCaptEmbed(eventsData[id])],
         components: [row],
         fetchReply: true
       });
@@ -171,7 +171,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 
-  /* BUTTONS */
+  /* ───── BUTTONS ───── */
   if (interaction.isButton()) {
 
     const [action, id] = interaction.customId.split('_');
@@ -182,13 +182,14 @@ client.on(Events.InteractionCreate, async interaction => {
 
     /* CAPT JOIN */
     if (action === 'join') {
+
       const modal = new ModalBuilder()
-        .setCustomId(`modal_${id}`)
-        .setTitle('Ник');
+        .setCustomId(`nick_${id}`)
+        .setTitle('Введите ник');
 
       const input = new TextInputBuilder()
         .setCustomId('nick')
-        .setLabel('Введите ник')
+        .setLabel('Ник')
         .setStyle(TextInputStyle.Short);
 
       modal.addComponents(new ActionRowBuilder().addComponents(input));
@@ -197,16 +198,17 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (action === 'leave') {
+
       event.users = event.users.filter(u => u.id !== interaction.user.id);
       save();
 
       const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
+      await msg.edit({ embeds: [createCaptEmbed(event)] });
 
       return interaction.reply({ content: 'Вышел', ephemeral: true });
     }
 
-    /* FAM */
+    /* FAM JOIN */
     if (action === 'fjoin') {
 
       if (!event.users.find(u => u.id === interaction.user.id)) {
@@ -218,10 +220,24 @@ client.on(Events.InteractionCreate, async interaction => {
 
       save();
 
-      const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
+      return interaction.reply({ content: 'Ты в капте', ephemeral: true });
+    }
 
-      return interaction.reply({ content: 'Вошёл', ephemeral: true });
+    /* POSITION */
+    if (action === 'fpos') {
+
+      const modal = new ModalBuilder()
+        .setCustomId(`pos_${id}`)
+        .setTitle('Выбор позиции');
+
+      const input = new TextInputBuilder()
+        .setCustomId('pos')
+        .setLabel('Введите позицию')
+        .setStyle(TextInputStyle.Short);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+      return interaction.showModal(modal);
     }
 
     if (action === 'fleave') {
@@ -231,60 +247,72 @@ client.on(Events.InteractionCreate, async interaction => {
 
       save();
 
-      const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
-
       return interaction.reply({ content: 'Вышел', ephemeral: true });
     }
+  }
 
-    if (action === 'fclear') {
+  /* ───── MODALS ───── */
+  if (interaction.isModalSubmit()) {
 
-      delete event.positions[interaction.user.id];
+    const [type, id] = interaction.customId.split('_');
+    const event = eventsData[id];
+
+    if (!event) return;
+
+    /* CAPT NICK */
+    if (type === 'nick') {
+
+      event.users.push({
+        id: interaction.user.id,
+        nick: interaction.fields.getTextInputValue('nick')
+      });
+
+      save();
+
+      const msg = await interaction.channel.messages.fetch(event.messageId);
+      await msg.edit({ embeds: [createCaptEmbed(event)] });
+
+      return interaction.reply({ content: 'Добавлен', ephemeral: true });
+    }
+
+    /* POSITION */
+    if (type === 'pos') {
+
+      const pos = parseInt(interaction.fields.getTextInputValue('pos'));
+
+      if (isNaN(pos) || pos < 1 || pos > event.max)
+        return interaction.reply({ content: 'Неверная позиция', ephemeral: true });
+
+      if (Object.values(event.positions).includes(pos))
+        return interaction.reply({ content: 'Занято', ephemeral: true });
+
+      event.positions[interaction.user.id] = pos;
       save();
 
       const thread = await client.channels.fetch(event.threadId);
-      const msg = await thread.send({ embeds: [createFamEmbed(event)] });
+      await thread.send({ embeds: [createFamEmbed(event)] });
 
-      return interaction.reply({ content: 'Позиция убрана', ephemeral: true });
+      return interaction.reply({ content: `Позиция ${pos} занята`, ephemeral: true });
     }
-  }
-
-  /* MODAL */
-  if (interaction.isModalSubmit()) {
-
-    const id = interaction.customId.split('_')[1];
-    const event = eventsData[id];
-
-    event.users.push({
-      id: interaction.user.id,
-      nick: interaction.fields.getTextInputValue('nick')
-    });
-
-    save();
-
-    const msg = await interaction.channel.messages.fetch(event.messageId);
-    await msg.edit({ embeds: [createEmbed(event)] });
-
-    return interaction.reply({ content: 'Добавлен', ephemeral: true });
   }
 });
 
-/* SLASH COMMANDS */
+/* ───── COMMANDS ───── */
 
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
     .setDescription('Создать капт')
-    .addStringOption(o => o.setName('название').setDescription('Название').setRequired(true))
-    .addStringOption(o => o.setName('дата').setDescription('Дата').setRequired(true))
-    .addIntegerOption(o => o.setName('колво').setDescription('Кол-во').setRequired(true)),
+    .addStringOption(o => o.setName('название').setDescription('название').setRequired(true))
+    .addStringOption(o => o.setName('дата').setDescription('дата').setRequired(true))
+    .addIntegerOption(o => o.setName('колво').setDescription('колво').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('фамкапт')
     .setDescription('Фам капт')
-    .addStringOption(o => o.setName('название').setDescription('Название').setRequired(true))
-    .addStringOption(o => o.setName('дата').setDescription('Дата').setRequired(true))
-    .addIntegerOption(o => o.setName('колво').setDescription('Кол-во').setRequired(true))
+    .addStringOption(o => o.setName('название').setDescription('название').setRequired(true))
+    .addStringOption(o => o.setName('дата').setDescription('дата').setRequired(true))
+    .addIntegerOption(o => o.setName('колво').setDescription('колво').setRequired(true))
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
