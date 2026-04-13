@@ -44,7 +44,8 @@ if (fs.existsSync('data.json')) {
   }
 }
 
-const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
+const save = () =>
+  fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
 /* ───── HELPERS ───── */
 
@@ -117,7 +118,7 @@ client.on(Events.InteractionCreate, async (i) => {
 
     if (i.isChatInputCommand()) {
 
-      /* ─── CAPT ─── */
+      /* CAPT (NO THREAD) */
       if (i.commandName === 'капт') {
 
         const id = Date.now().toString();
@@ -130,16 +131,14 @@ client.on(Events.InteractionCreate, async (i) => {
           max: i.options.getInteger('колво'),
           users: [],
           closed: false,
-          messageId: null,
-          threadId: null
+          messageId: null
         };
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
           new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
-          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId(`edit_${id}`).setLabel('✏️').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
         );
 
         const msg = await i.reply({
@@ -148,18 +147,11 @@ client.on(Events.InteractionCreate, async (i) => {
           fetchReply: true
         });
 
-        const thread = await msg.startThread({
-          name: "капт",
-          autoArchiveDuration: 60
-        });
-
         data[id].messageId = msg.id;
-        data[id].threadId = thread.id;
-
         save();
       }
 
-      /* ─── FAM CAPT ─── */
+      /* FAM CAPT (WITH THREAD) */
       if (i.commandName === 'фамкапт') {
 
         const id = Date.now().toString();
@@ -181,8 +173,7 @@ client.on(Events.InteractionCreate, async (i) => {
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`fjoin_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
-          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId(`edit_${id}`).setLabel('✏️').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
         );
 
         const msg = await i.reply({
@@ -200,7 +191,10 @@ client.on(Events.InteractionCreate, async (i) => {
           embeds: [famEmbed(data[id])],
           components: [
             new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId(`fpos_${id}`).setLabel('🎯 позиция').setStyle(ButtonStyle.Primary)
+              new ButtonBuilder()
+                .setCustomId(`fpos_${id}`)
+                .setLabel('🎯 позиция')
+                .setStyle(ButtonStyle.Primary)
             )
           ]
         });
@@ -223,13 +217,13 @@ client.on(Events.InteractionCreate, async (i) => {
 
       const isOwner = i.user.id === e.owner;
 
-      /* ─ JOIN ─ */
+      /* JOIN */
       if (a === 'join' || a === 'fjoin') {
 
         if (e.closed)
           return i.reply({ content: 'Закрыто', ephemeral: true });
 
-        const nickModal = new ModalBuilder()
+        const modal = new ModalBuilder()
           .setCustomId(`nick_${id}`)
           .setTitle('Ник');
 
@@ -238,23 +232,23 @@ client.on(Events.InteractionCreate, async (i) => {
           .setLabel('Введите ник')
           .setStyle(TextInputStyle.Short);
 
-        nickModal.addComponents(new ActionRowBuilder().addComponents(input));
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
 
-        return i.showModal(nickModal);
+        return i.showModal(modal);
       }
 
-      /* ─ REMOVE ─ */
+      /* REMOVE */
       if (a === 'remove') {
         if (!isOwner)
           return i.reply({ content: 'Нет прав', ephemeral: true });
 
         const modal = new ModalBuilder()
           .setCustomId(`remove_${id}`)
-          .setTitle('Удалить участника (номер)');
+          .setTitle('Удалить по номеру');
 
         const input = new TextInputBuilder()
           .setCustomId('num')
-          .setLabel('Введите номер участника')
+          .setLabel('Номер участника')
           .setStyle(TextInputStyle.Short);
 
         modal.addComponents(new ActionRowBuilder().addComponents(input));
@@ -262,7 +256,7 @@ client.on(Events.InteractionCreate, async (i) => {
         return i.showModal(modal);
       }
 
-      /* ─ CLOSE ─ */
+      /* CLOSE */
       if (a === 'close') {
         if (!isOwner)
           return i.reply({ content: 'Нет прав', ephemeral: true });
@@ -276,26 +270,7 @@ client.on(Events.InteractionCreate, async (i) => {
         return i.reply({ content: 'Статус изменён', ephemeral: true });
       }
 
-      /* ─ EDIT ─ */
-      if (a === 'edit') {
-        if (!isOwner)
-          return i.reply({ content: 'Нет прав', ephemeral: true });
-
-        const modal = new ModalBuilder()
-          .setCustomId(`edit_${id}`)
-          .setTitle('Изменить дату');
-
-        const input = new TextInputBuilder()
-          .setCustomId('date')
-          .setLabel('Новая дата/время')
-          .setStyle(TextInputStyle.Short);
-
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-        return i.showModal(modal);
-      }
-
-      /* ─ FPOS BUTTON IN THREAD ─ */
+      /* FPOS ONLY IN THREAD */
       if (a === 'fpos') {
 
         const modal = new ModalBuilder()
@@ -321,16 +296,16 @@ client.on(Events.InteractionCreate, async (i) => {
       const e = data[id];
       if (!e) return i.reply({ content: 'Нет данных', ephemeral: true });
 
-      /* ─ JOIN ─ */
+      /* JOIN */
       if (t === 'nick') {
 
         const nick = i.fields.getTextInputValue('nick');
 
+        if (e.users.find(u => u.id === i.user.id))
+          return i.reply({ content: 'Ты уже в списке', ephemeral: true });
+
         e.users.push({ id: i.user.id, nick });
         save();
-
-        const thread = await safeChannel(e.threadId);
-        await thread?.members.add(i.user.id).catch(() => {});
 
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
@@ -338,58 +313,61 @@ client.on(Events.InteractionCreate, async (i) => {
         return i.reply({ content: 'Добавлен', ephemeral: true });
       }
 
-      /* ─ REMOVE ─ */
+      /* REMOVE */
       if (t === 'remove') {
 
         const num = parseInt(i.fields.getTextInputValue('num'));
-        if (isNaN(num)) return i.reply({ content: 'Ошибка', ephemeral: true });
-
         const user = e.users[num - 1];
-        if (!user) return i.reply({ content: 'Нет такого', ephemeral: true });
 
+        if (!user)
+          return i.reply({ content: 'Нет такого', ephemeral: true });
+
+        delete e.positions?.[user.id]; // анти-чит очистка позиции
         e.users.splice(num - 1, 1);
+
         save();
 
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
+
+        const thread = await safeChannel(e.threadId);
+        const tmsg = await thread?.messages.fetch(e.threadMsgId);
+
+        if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
 
         return i.reply({ content: 'Удалён', ephemeral: true });
       }
 
-      /* ─ EDIT DATE ─ */
-      if (t === 'edit') {
-
-        e.date = i.fields.getTextInputValue('date');
-        save();
-
-        const msg = await safeFetch(i.channel, e.messageId);
-        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
-
-        return i.reply({ content: 'Обновлено', ephemeral: true });
-      }
-
-      /* ─ FPOS ─ */
+      /* FPOS ANTI-CHEAT */
       if (t === 'fpos') {
 
         const pos = parseInt(i.fields.getTextInputValue('pos'));
 
         if (isNaN(pos) || pos < 1 || pos > e.max)
-          return i.reply({ content: 'Ошибка', ephemeral: true });
+          return i.reply({ content: 'Ошибка позиции', ephemeral: true });
 
-        if (Object.values(e.positions).find(x => x.pos === pos))
-          return i.reply({ content: 'Занято', ephemeral: true });
+        const alreadyHasPos = Object.values(e.positions || {})
+          .find(x => x.id === i.user.id);
+
+        if (alreadyHasPos)
+          return i.reply({ content: 'Ты уже занял позицию', ephemeral: true });
+
+        if (Object.values(e.positions || {})
+          .find(x => x.pos === pos))
+          return i.reply({ content: 'Позиция занята', ephemeral: true });
 
         e.positions[i.user.id] = {
           pos,
-          nick: e.users.find(u => u.id === i.user.id)?.nick || 'no-nick'
+          nick: e.users.find(u => u.id === i.user.id)?.nick || 'no-nick',
+          id: i.user.id
         };
 
         save();
 
         const thread = await safeChannel(e.threadId);
-        const msg = await thread?.messages.fetch(e.threadMsgId);
+        const tmsg = await thread?.messages.fetch(e.threadMsgId);
 
-        if (msg) await msg.edit({ embeds: [famEmbed(e)] });
+        if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
 
         return i.reply({ content: `Позиция ${pos} занята`, ephemeral: true });
       }
@@ -405,41 +383,23 @@ client.on(Events.InteractionCreate, async (i) => {
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
-    .setDescription('Создать капт')
+    .setDescription('капт')
     .addStringOption(o =>
-      o.setName('название')
-        .setDescription('Название')
-        .setRequired(true)
-    )
+      o.setName('название').setDescription('название').setRequired(true))
     .addStringOption(o =>
-      o.setName('дата')
-        .setDescription('Дата')
-        .setRequired(true)
-    )
+      o.setName('дата').setDescription('дата').setRequired(true))
     .addIntegerOption(o =>
-      o.setName('колво')
-        .setDescription('Количество')
-        .setRequired(true)
-    ),
+      o.setName('колво').setDescription('колво').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('фамкапт')
-    .setDescription('Создать фам капт')
+    .setDescription('фам капт')
     .addStringOption(o =>
-      o.setName('название')
-        .setDescription('Название')
-        .setRequired(true)
-    )
+      o.setName('название').setDescription('название').setRequired(true))
     .addStringOption(o =>
-      o.setName('дата')
-        .setDescription('Дата')
-        .setRequired(true)
-    )
+      o.setName('дата').setDescription('дата').setRequired(true))
     .addIntegerOption(o =>
-      o.setName('колво')
-        .setDescription('Количество')
-        .setRequired(true)
-    )
+      o.setName('колво').setDescription('колво').setRequired(true))
 ];
 
 /* ───── REGISTER ───── */
