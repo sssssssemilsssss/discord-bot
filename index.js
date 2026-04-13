@@ -15,6 +15,7 @@ const {
 } = require('discord.js');
 
 const fs = require('fs');
+const http = require('http');
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1438878652250198069';
@@ -39,21 +40,7 @@ function save() {
   fs.writeFileSync('data.json', JSON.stringify(eventsData, null, 2));
 }
 
-/* ───── КАРТИНКИ ───── */
-
-const images = [
-  'https://i.imgur.com/XVaHFVH.jpeg',
-  'https://i.imgur.com/gTlqFJh.png',
-  'https://i.imgur.com/f1zyGkj.png',
-  'https://i.imgur.com/pyNF0UG.png',
-  'https://i.imgur.com/2ejrfV6.png'
-];
-
-function getRandomImage() {
-  return images[Math.floor(Math.random() * images.length)];
-}
-
-/* ───── EMBEDЫ ───── */
+/* ───── EMBEDS ───── */
 
 function createEmbed(event) {
   const list = event.users
@@ -71,32 +58,69 @@ function createEmbed(event) {
       `**Участники (${event.users.length}/${event.max})**\n\n` +
       `${list || 'Пока никого нет'}`
     )
-    .setImage(getRandomImage())
     .setTimestamp();
 }
 
-function createFamEmbed(event) {
+function createFamMainEmbed(event) {
+  const list = event.users
+    .map((u, i) => `▫️ ${i + 1}. <@${u.id}>`)
+    .join('\n');
 
-  let list = '';
+  return new EmbedBuilder()
+    .setColor(0x00ff00)
+    .setDescription(
+      `# ${event.title}\n\n` +
+      `**Создал:** <@${event.owner}>\n` +
+      `**Дата:** ${event.date}\n\n` +
+      `**Участники (${event.users.length}/${event.max})**\n\n` +
+      `${list || 'Пока никого нет'}`
+    )
+    .setTimestamp();
+}
+
+function createFamThreadEmbed(event) {
+
+  let text = '';
 
   for (let i = 1; i <= event.max; i++) {
 
-    const userId = Object.keys(event.positions)
+    const user = Object.keys(event.positions)
       .find(id => event.positions[id] === i);
 
-    if (userId) {
-      list += `🔴 ${i} — <@${userId}>\n`;
+    if (user) {
+      text += `🔴 ${i} — <@${user}>\n`;
     } else {
-      list += `🟢 ${i} — свободно\n`;
+      text += `🟢 ${i} — свободно\n`;
     }
   }
 
   return new EmbedBuilder()
     .setColor(0x2b2d31)
-    .setTitle(`Фам капт (${Object.keys(event.positions).length}/${event.max})`)
-    .setDescription(list)
-    .setImage(getRandomImage())
-    .setTimestamp();
+    .setTitle('Позиции')
+    .setDescription(text);
+}
+
+/* ───── КИК КНОПКИ ───── */
+
+function createKickButtons(eventId, users) {
+  const rows = [];
+
+  for (let i = 0; i < users.length; i += 5) {
+    const row = new ActionRowBuilder();
+
+    users.slice(i, i + 5).forEach((u, index) => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`kick_${eventId}_${i + index}`)
+          .setLabel(`❌ ${i + index + 1}`)
+          .setStyle(ButtonStyle.Danger)
+      );
+    });
+
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 /* ───── READY ───── */
@@ -109,7 +133,6 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 
-  /* КОМАНДЫ */
   if (interaction.isChatInputCommand()) {
 
     /* ───── /капт ───── */
@@ -123,13 +146,14 @@ client.on(Events.InteractionCreate, async interaction => {
       const id = Date.now().toString();
 
       eventsData[id] = {
+        type: 'capt',
         owner: interaction.user.id,
         title,
         date,
         max,
         users: [],
-        closed: false,
-        messageId: null
+        messageId: null,
+        closed: false
       };
 
       const row = new ActionRowBuilder().addComponents(
@@ -141,6 +165,11 @@ client.on(Events.InteractionCreate, async interaction => {
         new ButtonBuilder()
           .setCustomId(`leave_${id}`)
           .setLabel('🚪 Выйти')
+          .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+          .setCustomId(`close_${id}`)
+          .setLabel('🔒 Закрыть')
           .setStyle(ButtonStyle.Secondary)
       );
 
@@ -160,12 +189,19 @@ client.on(Events.InteractionCreate, async interaction => {
 
     if (interaction.commandName === 'фамкапт') {
 
-      const max = interaction.options.getInteger('слоты');
+      const title = interaction.options.getString('название');
+      const date = interaction.options.getString('дата');
+      const max = interaction.options.getInteger('колво');
+
       const id = Date.now().toString();
 
       eventsData[id] = {
+        type: 'fam',
         owner: interaction.user.id,
+        title,
+        date,
         max,
+        users: [],
         positions: {},
         threadId: null,
         messageId: null
@@ -189,7 +225,7 @@ client.on(Events.InteractionCreate, async interaction => {
       );
 
       const msg = await interaction.reply({
-        embeds: [createFamEmbed(eventsData[id])],
+        embeds: [createFamMainEmbed(eventsData[id])],
         components: [row],
         fetchReply: true
       });
@@ -202,6 +238,10 @@ client.on(Events.InteractionCreate, async interaction => {
       eventsData[id].threadId = thread.id;
       eventsData[id].messageId = msg.id;
 
+      await thread.send({
+        embeds: [createFamThreadEmbed(eventsData[id])]
+      });
+
       save();
     }
   }
@@ -210,15 +250,19 @@ client.on(Events.InteractionCreate, async interaction => {
 
   if (interaction.isButton()) {
 
-    const [action, id] = interaction.customId.split('_');
+    const parts = interaction.customId.split('_');
+    const action = parts[0];
+    const id = parts[1];
+
     const event = eventsData[id];
     if (!event) return;
 
     const channel = interaction.channel;
 
-    /* ───── ОБЫЧНЫЙ КАПТ ───── */
+    /* ───── КАПТ ───── */
 
     if (action === 'join') {
+
       if (event.users.find(u => u.id === interaction.user.id))
         return interaction.reply({ content: 'Ты уже в списке', ephemeral: true });
 
@@ -237,35 +281,84 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (action === 'leave') {
+
       event.users = event.users.filter(u => u.id !== interaction.user.id);
       save();
 
       const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createEmbed(event)] });
+
+      await msg.edit({
+        embeds: [createEmbed(event)],
+        components: [
+          msg.components[0],
+          ...createKickButtons(id, event.users)
+        ]
+      });
 
       return interaction.reply({ content: 'Ты вышел', ephemeral: true });
     }
 
-    /* ───── ФАМ КАПТ ───── */
+    if (action === 'close') {
+
+      if (interaction.user.id !== event.owner)
+        return interaction.reply({ content: 'Только создатель', ephemeral: true });
+
+      const msg = await channel.messages.fetch(event.messageId);
+
+      await msg.edit({
+        embeds: [createEmbed(event)],
+        components: []
+      });
+
+      return interaction.reply({ content: 'Закрыто', ephemeral: true });
+    }
+
+    if (action === 'kick') {
+
+      const index = parseInt(parts[2]);
+      event.users.splice(index, 1);
+      save();
+
+      const msg = await channel.messages.fetch(event.messageId);
+
+      await msg.edit({
+        embeds: [createEmbed(event)],
+        components: [
+          msg.components[0],
+          ...createKickButtons(id, event.users)
+        ]
+      });
+
+      return interaction.reply({ content: 'Удалён', ephemeral: true });
+    }
+
+    /* ───── ФАМ ───── */
 
     if (action === 'fjoin') {
+
+      if (event.users.find(u => u.id === interaction.user.id))
+        return interaction.reply({ content: 'Ты уже в списке', ephemeral: true });
+
+      event.users.push({ id: interaction.user.id });
+      save();
 
       const thread = await client.channels.fetch(event.threadId);
       await thread.members.add(interaction.user.id);
 
-      return interaction.reply({ content: 'Ты в ветке', ephemeral: true });
+      const msg = await channel.messages.fetch(event.messageId);
+      await msg.edit({ embeds: [createFamMainEmbed(event)] });
+
+      return interaction.reply({ content: 'Ты вошёл', ephemeral: true });
     }
 
     if (action === 'fleave') {
 
-      const thread = await client.channels.fetch(event.threadId);
-      await thread.members.remove(interaction.user.id);
-
+      event.users = event.users.filter(u => u.id !== interaction.user.id);
       delete event.positions[interaction.user.id];
       save();
 
       const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createFamEmbed(event)] });
+      await msg.edit({ embeds: [createFamMainEmbed(event)] });
 
       return interaction.reply({ content: 'Ты вышел', ephemeral: true });
     }
@@ -275,8 +368,13 @@ client.on(Events.InteractionCreate, async interaction => {
       delete event.positions[interaction.user.id];
       save();
 
-      const msg = await channel.messages.fetch(event.messageId);
-      await msg.edit({ embeds: [createFamEmbed(event)] });
+      const thread = await client.channels.fetch(event.threadId);
+      const messages = await thread.messages.fetch({ limit: 5 });
+      const botMsg = messages.find(m => m.author.id === client.user.id);
+
+      if (botMsg) {
+        await botMsg.edit({ embeds: [createFamThreadEmbed(event)] });
+      }
 
       return interaction.reply({ content: 'Позиция очищена', ephemeral: true });
     }
@@ -297,13 +395,20 @@ client.on(Events.InteractionCreate, async interaction => {
     save();
 
     const msg = await interaction.channel.messages.fetch(event.messageId);
-    await msg.edit({ embeds: [createEmbed(event)] });
+
+    await msg.edit({
+      embeds: [createEmbed(event)],
+      components: [
+        msg.components[0],
+        ...createKickButtons(id, event.users)
+      ]
+    });
 
     return interaction.reply({ content: 'Ты добавлен', ephemeral: true });
   }
 });
 
-/* ───── СООБЩЕНИЯ (ПОЗИЦИИ) ───── */
+/* ───── ПОЗИЦИИ ───── */
 
 client.on('messageCreate', async message => {
 
@@ -317,35 +422,44 @@ client.on('messageCreate', async message => {
   const num = parseInt(message.content);
   if (isNaN(num)) return;
 
-  if (num < 1 || num > event.max)
-    return message.reply('Неверная позиция');
-
   if (Object.values(event.positions).includes(num))
     return message.reply('Позиция занята');
 
   event.positions[message.author.id] = num;
   save();
 
-  const parent = await message.channel.parent.messages.fetch(event.messageId);
-  await parent.edit({ embeds: [createFamEmbed(event)] });
+  const messages = await message.channel.messages.fetch({ limit: 5 });
+  const botMsg = messages.find(m => m.author.id === client.user.id);
 
-  message.reply(`Ты занял позицию ${num}`);
+  if (botMsg) {
+    await botMsg.edit({ embeds: [createFamThreadEmbed(event)] });
+  }
+
+  message.reply(`Ты занял ${num}`);
 });
 
-/* ───── РЕГИСТРАЦИЯ КОМАНД ───── */
+/* ───── HTTP ───── */
+
+http.createServer((req, res) => {
+  res.end('OK');
+}).listen(3000);
+
+/* ───── КОМАНДЫ ───── */
 
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
     .setDescription('Создать капт')
-    .addStringOption(o => o.setName('название').setDescription('Название').setRequired(true))
-    .addStringOption(o => o.setName('дата').setDescription('Дата').setRequired(true))
-    .addIntegerOption(o => o.setName('колво').setDescription('Количество').setRequired(true)),
+    .addStringOption(o => o.setName('название').setRequired(true))
+    .addStringOption(o => o.setName('дата').setRequired(true))
+    .addIntegerOption(o => o.setName('колво').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('фамкапт')
     .setDescription('Фам капт')
-    .addIntegerOption(o => o.setName('слоты').setDescription('Слоты').setRequired(true))
+    .addStringOption(o => o.setName('название').setRequired(true))
+    .addStringOption(o => o.setName('дата').setRequired(true))
+    .addIntegerOption(o => o.setName('колво').setRequired(true))
 ];
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
