@@ -30,25 +30,28 @@ if (fs.existsSync('data.json')) {
 }
 const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
-/* ✅ РАБОЧИЕ КАРТИНКИ (прямые ссылки) */
+/* IMAGES (рабочие) */
 
 const images = [
-  "https://i.imgur.com/8Km9tLL.jpg",
-  "https://i.imgur.com/ZF6s192.jpg",
-  "https://i.imgur.com/2DhmtJ4.jpg",
-  "https://i.imgur.com/jTqXJ0K.jpg",
-  "https://i.imgur.com/k7r3K9B.jpg",
-  "https://i.imgur.com/yXOvdOS.jpg",
-  "https://i.imgur.com/Wv3K6XK.jpg",
-  "https://i.imgur.com/5tj6S7Ol.jpg"
+  "https://i.imgur.com/1ZQZ1Zm.jpeg",
+  "https://i.imgur.com/3ZUrjUP.jpeg",
+  "https://i.imgur.com/8Km9tLL.jpeg",
+  "https://i.imgur.com/oYiTqum.jpeg",
+  "https://i.imgur.com/2DhmtJ4.jpeg",
+  "https://i.imgur.com/Wv3K6XK.jpeg"
 ];
 
 const randImg = () => images[Math.floor(Math.random() * images.length)];
 
 /* HELPERS */
 
-const safeFetch = async (ch, id) => { try { return await ch.messages.fetch(id); } catch {} };
-const safeChannel = async (id) => { try { return await client.channels.fetch(id); } catch {} };
+const safeFetch = async (ch, id) => {
+  try { return await ch.messages.fetch(id); } catch {}
+};
+
+const safeChannel = async (id) => {
+  try { return await client.channels.fetch(id); } catch {}
+};
 
 /* EMBEDS */
 
@@ -93,11 +96,9 @@ client.on(Events.InteractionCreate, async (i) => {
 
     if (i.isChatInputCommand()) {
 
-      /* ✅ /КАПТ */
+      const id = Date.now().toString();
 
       if (i.commandName === 'капт') {
-
-        const id = Date.now().toString();
 
         data[id] = {
           type: 'capt',
@@ -112,7 +113,6 @@ client.on(Events.InteractionCreate, async (i) => {
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
         );
 
@@ -126,11 +126,7 @@ client.on(Events.InteractionCreate, async (i) => {
         save();
       }
 
-      /* ✅ /ФАМКАПТ */
-
       if (i.commandName === 'фамкапт') {
-
-        const id = Date.now().toString();
 
         data[id] = {
           type: 'fam',
@@ -146,7 +142,6 @@ client.on(Events.InteractionCreate, async (i) => {
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
         );
 
@@ -161,15 +156,14 @@ client.on(Events.InteractionCreate, async (i) => {
           type: 12
         });
 
-        const threadRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯 позиция').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 выйти').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`rpos_${id}`).setLabel('❌ убрать позицию').setStyle(ButtonStyle.Danger)
-        );
-
         const tmsg = await thread.send({
           embeds: [famEmbed(data[id])],
-          components: [threadRow]
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary)
+            )
+          ]
         });
 
         data[id].messageId = msg.id;
@@ -180,10 +174,141 @@ client.on(Events.InteractionCreate, async (i) => {
       }
     }
 
-    /* BUTTONS + MODALS остаются такими же как у тебя (логика уже рабочая) */
+    /* BUTTONS */
 
-  } catch (e) {
-    console.log(e);
+    if (i.isButton()) {
+
+      const [a, id] = i.customId.split('_');
+      const e = data[id];
+      if (!e) return;
+
+      if (a === 'join') {
+
+        if (e.closed)
+          return i.reply({ content: 'Закрыто', ephemeral: true });
+
+        const modal = new ModalBuilder()
+          .setCustomId(`nick_${id}`)
+          .setTitle('Ник');
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('nick')
+              .setLabel('Введите ник')
+              .setStyle(TextInputStyle.Short)
+          )
+        );
+
+        return i.showModal(modal);
+      }
+
+      if (a === 'leave') {
+
+        e.users = e.users.filter(u => u.id !== i.user.id);
+        delete e.positions?.[i.user.id];
+
+        save();
+
+        const msg = await safeFetch(i.channel, e.messageId);
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
+
+        if (e.threadId) {
+          const thread = await safeChannel(e.threadId);
+          const tmsg = await thread?.messages.fetch(e.threadMsgId);
+          if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
+        }
+
+        return i.reply({ content: 'Ты вышел', ephemeral: true });
+      }
+
+      if (a === 'close') {
+        e.closed = !e.closed;
+        save();
+
+        const msg = await safeFetch(i.channel, e.messageId);
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
+
+        return i.reply({ content: 'Обновлено', ephemeral: true });
+      }
+
+      if (a === 'pos') {
+
+        const modal = new ModalBuilder()
+          .setCustomId(`pos_${id}`)
+          .setTitle('Позиция');
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('pos')
+              .setLabel('Введите позицию')
+              .setStyle(TextInputStyle.Short)
+          )
+        );
+
+        return i.showModal(modal);
+      }
+    }
+
+    /* MODALS */
+
+    if (i.isModalSubmit()) {
+
+      const [t, id] = i.customId.split('_');
+      const e = data[id];
+      if (!e) return;
+
+      if (t === 'nick') {
+
+        if (e.users.find(u => u.id === i.user.id))
+          return i.reply({ content: 'Ты уже в списке', ephemeral: true });
+
+        const nick = i.fields.getTextInputValue('nick');
+
+        e.users.push({ id: i.user.id, nick });
+
+        if (e.threadId) {
+          const thread = await safeChannel(e.threadId);
+          await thread.members.add(i.user.id).catch(() => {});
+        }
+
+        save();
+
+        const msg = await safeFetch(i.channel, e.messageId);
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
+
+        return i.reply({ content: 'Добавлен', ephemeral: true });
+      }
+
+      if (t === 'pos') {
+
+        const pos = parseInt(i.fields.getTextInputValue('pos'));
+
+        if (e.positions[i.user.id])
+          return i.reply({ content: 'У тебя уже есть позиция', ephemeral: true });
+
+        if (Object.values(e.positions).find(x => x.pos === pos))
+          return i.reply({ content: 'Занято', ephemeral: true });
+
+        e.positions[i.user.id] = {
+          pos,
+          nick: e.users.find(u => u.id === i.user.id)?.nick
+        };
+
+        save();
+
+        const thread = await safeChannel(e.threadId);
+        const tmsg = await thread.messages.fetch(e.threadMsgId);
+
+        await tmsg.edit({ embeds: [famEmbed(e)] });
+
+        return i.reply({ content: 'Позиция занята', ephemeral: true });
+      }
+    }
+
+  } catch (err) {
+    console.log(err);
   }
 });
 
