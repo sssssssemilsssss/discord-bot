@@ -30,6 +30,21 @@ if (fs.existsSync('data.json')) {
 }
 const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
+/* 🖼️ КАРТИНКИ */
+
+const images = [
+  "https://i.imgur.com/TzljdDG.png",
+  "https://i.imgur.com/vKhqhAt.png",
+  "https://i.imgur.com/SNB4ZEc.png",
+  "https://i.imgur.com/WvDuWzf.png",
+  "https://i.imgur.com/2bmCvh5.png",
+  "https://i.imgur.com/YYe2XFM.png",
+  "https://i.imgur.com/E8tRsCd.png",
+  "https://i.imgur.com/KpR9SYY.png"
+];
+
+const randImg = () => images[Math.floor(Math.random() * images.length)];
+
 /* HELPERS */
 
 const safeFetch = async (ch, id) => {
@@ -49,6 +64,7 @@ function captEmbed(e) {
 
   return new EmbedBuilder()
     .setColor(0x00ff99)
+    .setImage(randImg())
     .setDescription(
       `## 📌 ${e.title}\n\n` +
       `📅 **Дата:** ${e.date}\n` +
@@ -70,6 +86,7 @@ function famEmbed(e) {
 
   return new EmbedBuilder()
     .setColor(0x5865F2)
+    .setImage(randImg())
     .setTitle('🎯 Распределение позиций')
     .setDescription(txt);
 }
@@ -88,8 +105,6 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isChatInputCommand()) {
 
       const id = Date.now().toString();
-
-      /* КАПТ */
 
       if (i.commandName === 'капт') {
 
@@ -118,8 +133,6 @@ client.on(Events.InteractionCreate, async (i) => {
         data[id].messageId = msg.id;
         save();
       }
-
-      /* ФАМ КАПТ */
 
       if (i.commandName === 'фамкапт') {
 
@@ -155,8 +168,9 @@ client.on(Events.InteractionCreate, async (i) => {
           embeds: [famEmbed(data[id])],
           components: [
             new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯 Выбрать позицию').setStyle(ButtonStyle.Primary),
-              new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 Выйти').setStyle(ButtonStyle.Secondary)
+              new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯 Выбрать').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 Выйти').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId(`rpos_${id}`).setLabel('❌ Убрать').setStyle(ButtonStyle.Danger)
             )
           ]
         });
@@ -177,14 +191,15 @@ client.on(Events.InteractionCreate, async (i) => {
       const e = data[id];
       if (!e) return;
 
-      if (a === 'join') {
+      const isOwner = i.user.id === e.owner;
 
+      if (a === 'join') {
         if (e.closed)
-          return i.reply({ content: '🔒 Капт закрыт', ephemeral: true });
+          return i.reply({ content: '🔒 Закрыто', ephemeral: true });
 
         const modal = new ModalBuilder()
           .setCustomId(`nick_${id}`)
-          .setTitle('📝 Ввод ника');
+          .setTitle('📝 Ник');
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(
@@ -231,13 +246,33 @@ client.on(Events.InteractionCreate, async (i) => {
 
         const modal = new ModalBuilder()
           .setCustomId(`pos_${id}`)
-          .setTitle('🎯 Выбор позиции');
+          .setTitle('🎯 Позиция');
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('pos')
-              .setLabel('Только цифра (например: 3)')
+              .setLabel('Только цифры')
+              .setStyle(TextInputStyle.Short)
+          )
+        );
+
+        return i.showModal(modal);
+      }
+
+      if (a === 'rpos') {
+        if (!isOwner)
+          return i.reply({ content: '❌ Нет прав', ephemeral: true });
+
+        const modal = new ModalBuilder()
+          .setCustomId(`rpos_${id}`)
+          .setTitle('❌ Удалить позицию');
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('num')
+              .setLabel('Номер позиции')
               .setStyle(TextInputStyle.Short)
           )
         );
@@ -260,11 +295,8 @@ client.on(Events.InteractionCreate, async (i) => {
 
         const existing = e.users.find(u => u.id === i.user.id);
 
-        if (existing) {
-          existing.nick = nick; // фикс undefined
-        } else {
-          e.users.push({ id: i.user.id, nick });
-        }
+        if (existing) existing.nick = nick;
+        else e.users.push({ id: i.user.id, nick });
 
         if (e.threadId) {
           const thread = await safeChannel(e.threadId);
@@ -284,15 +316,15 @@ client.on(Events.InteractionCreate, async (i) => {
         const input = i.fields.getTextInputValue('pos');
 
         if (!/^\d+$/.test(input))
-          return i.reply({ content: '❌ Только цифры!', ephemeral: true });
+          return i.reply({ content: '❌ Только цифры', ephemeral: true });
 
         const pos = parseInt(input);
 
         if (pos < 1 || pos > e.max)
-          return i.reply({ content: '❌ Вне диапазона', ephemeral: true });
+          return i.reply({ content: '❌ Ошибка', ephemeral: true });
 
         if (e.positions[i.user.id])
-          return i.reply({ content: '❌ У тебя уже есть позиция', ephemeral: true });
+          return i.reply({ content: '❌ Уже есть позиция', ephemeral: true });
 
         if (Object.values(e.positions).find(x => x.pos === pos))
           return i.reply({ content: '❌ Занято', ephemeral: true });
@@ -311,7 +343,29 @@ client.on(Events.InteractionCreate, async (i) => {
 
         await tmsg.edit({ embeds: [famEmbed(e)] });
 
-        return i.reply({ content: `✅ Позиция ${pos} занята`, ephemeral: true });
+        return i.reply({ content: `✅ Позиция ${pos}`, ephemeral: true });
+      }
+
+      if (t === 'rpos') {
+
+        const num = parseInt(i.fields.getTextInputValue('num'));
+
+        const uid = Object.keys(e.positions)
+          .find(id => e.positions[id].pos === num);
+
+        if (!uid)
+          return i.reply({ content: '❌ Пусто', ephemeral: true });
+
+        delete e.positions[uid];
+
+        save();
+
+        const thread = await safeChannel(e.threadId);
+        const tmsg = await thread.messages.fetch(e.threadMsgId);
+
+        await tmsg.edit({ embeds: [famEmbed(e)] });
+
+        return i.reply({ content: '✅ Удалено', ephemeral: true });
       }
     }
 
