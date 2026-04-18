@@ -22,13 +22,31 @@ const GUILD_ID = '1073591307487948833';
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+/* DATA */
+
 let data = {};
 if (fs.existsSync('data.json')) {
   try { data = JSON.parse(fs.readFileSync('data.json')); } catch {}
 }
 const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
+/* RANDOM IMAGES */
+
+const images = [
+  "https://ru.pinterest.com/pin/1122240800918263742/",
+  "https://ru.pinterest.com/pin/938789484858684245/",
+  "https://ru.pinterest.com/pin/921056561302211790/",
+  "https://ru.pinterest.com/pin/552465079317225208/",
+  "https://ru.pinterest.com/pin/588986457589121962/",
+  "https://ru.pinterest.com/pin/369154500724203624/",
+  "https://ru.pinterest.com/pin/163255555238881555/",
+  "https://ru.pinterest.com/pin/576742296072750246/"
+];
+
+const randImg = () => images[Math.floor(Math.random() * images.length)];
+
 /* HELPERS */
+
 const safeFetch = async (ch, id) => { try { return await ch.messages.fetch(id); } catch {} };
 const safeChannel = async (id) => { try { return await client.channels.fetch(id); } catch {} };
 
@@ -41,6 +59,7 @@ function captEmbed(e) {
 
   return new EmbedBuilder()
     .setColor(0x00ff00)
+    .setImage(randImg())
     .setDescription(
       `# ${e.title}\n\nДата: ${e.date}\nСтатус: ${e.closed ? '🔴 Закрыт' : '🟢 Открыт'}\n\nУчастники (${e.users.length}/${e.max})\n\n${list}`
     );
@@ -54,7 +73,11 @@ function famEmbed(e) {
       ? `🔴 ${i} — <@${uid}> | ${e.positions[uid].nick}\n`
       : `🟢 ${i} — свободно\n`;
   }
-  return new EmbedBuilder().setTitle('Фам капт').setDescription(txt);
+
+  return new EmbedBuilder()
+    .setTitle('Фам капт')
+    .setImage(randImg())
+    .setDescription(txt);
 }
 
 /* READY */
@@ -65,8 +88,6 @@ client.once(Events.ClientReady, () => console.log('READY'));
 
 client.on(Events.InteractionCreate, async (i) => {
   try {
-
-    /* SLASH */
 
     if (i.isChatInputCommand()) {
 
@@ -97,14 +118,12 @@ client.on(Events.InteractionCreate, async (i) => {
           fetchReply: true
         });
 
-        const thread = await msg.startThread({
-          name: 'фам капт',
-          type: 12
-        });
+        const thread = await msg.startThread({ name: 'фам капт', type: 12 });
 
         const threadRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯 позиция').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 выйти').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 выйти').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`rpos_${id}`).setLabel('❌ убрать позицию').setStyle(ButtonStyle.Danger)
         );
 
         const tmsg = await thread.send({
@@ -130,10 +149,7 @@ client.on(Events.InteractionCreate, async (i) => {
 
       const isOwner = i.user.id === e.owner;
 
-      /* JOIN */
-
       if (a === 'join') {
-
         if (e.closed)
           return i.reply({ content: 'Закрыто', ephemeral: true });
 
@@ -149,8 +165,6 @@ client.on(Events.InteractionCreate, async (i) => {
         m.addComponents(new ActionRowBuilder().addComponents(input));
         return i.showModal(m);
       }
-
-      /* LEAVE (ГЛОБАЛЬНЫЙ) */
 
       if (a === 'leave') {
 
@@ -169,41 +183,22 @@ client.on(Events.InteractionCreate, async (i) => {
         return i.reply({ content: 'Ты вышел', ephemeral: true });
       }
 
-      /* REMOVE */
-
-      if (a === 'remove') {
+      if (a === 'rpos') {
         if (!isOwner)
           return i.reply({ content: 'Нет прав', ephemeral: true });
 
         const m = new ModalBuilder()
-          .setCustomId(`remove_${id}`)
-          .setTitle('Удалить');
+          .setCustomId(`rpos_${id}`)
+          .setTitle('Убрать позицию');
 
         const input = new TextInputBuilder()
           .setCustomId('num')
-          .setLabel('Номер')
+          .setLabel('Номер позиции')
           .setStyle(TextInputStyle.Short);
 
         m.addComponents(new ActionRowBuilder().addComponents(input));
         return i.showModal(m);
       }
-
-      /* CLOSE */
-
-      if (a === 'close') {
-        if (!isOwner)
-          return i.reply({ content: 'Нет прав', ephemeral: true });
-
-        e.closed = !e.closed;
-        save();
-
-        const msg = await safeFetch(i.channel, e.messageId);
-        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
-
-        return i.reply({ content: 'Обновлено', ephemeral: true });
-      }
-
-      /* POSITION */
 
       if (a === 'pos') {
 
@@ -229,8 +224,6 @@ client.on(Events.InteractionCreate, async (i) => {
       const e = data[id];
       if (!e) return;
 
-      /* JOIN */
-
       if (t === 'nick') {
 
         const nick = i.fields.getTextInputValue('nick');
@@ -248,29 +241,8 @@ client.on(Events.InteractionCreate, async (i) => {
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Ты добавлен', ephemeral: true });
+        return i.reply({ content: 'Добавлен', ephemeral: true });
       }
-
-      /* REMOVE */
-
-      if (t === 'remove') {
-
-        const num = parseInt(i.fields.getTextInputValue('num'));
-        const user = e.users[num - 1];
-        if (!user) return i.reply({ content: 'Ошибка', ephemeral: true });
-
-        delete e.positions[user.id];
-        e.users.splice(num - 1, 1);
-
-        save();
-
-        const msg = await safeFetch(i.channel, e.messageId);
-        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
-
-        return i.reply({ content: 'Удалён', ephemeral: true });
-      }
-
-      /* POSITION */
 
       if (t === 'pos') {
 
@@ -298,6 +270,28 @@ client.on(Events.InteractionCreate, async (i) => {
         await tmsg.edit({ embeds: [famEmbed(e)] });
 
         return i.reply({ content: 'Позиция занята', ephemeral: true });
+      }
+
+      if (t === 'rpos') {
+
+        const num = parseInt(i.fields.getTextInputValue('num'));
+
+        const uid = Object.keys(e.positions)
+          .find(id => e.positions[id].pos === num);
+
+        if (!uid)
+          return i.reply({ content: 'Позиция пустая', ephemeral: true });
+
+        delete e.positions[uid];
+
+        save();
+
+        const thread = await safeChannel(e.threadId);
+        const tmsg = await thread.messages.fetch(e.threadMsgId);
+
+        await tmsg.edit({ embeds: [famEmbed(e)] });
+
+        return i.reply({ content: 'Позиция очищена', ephemeral: true });
       }
     }
 
