@@ -30,19 +30,6 @@ if (fs.existsSync('data.json')) {
 }
 const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
-/* IMAGES (рабочие) */
-
-const images = [
-  "https://i.imgur.com/1ZQZ1Zm.jpeg",
-  "https://i.imgur.com/3ZUrjUP.jpeg",
-  "https://i.imgur.com/8Km9tLL.jpeg",
-  "https://i.imgur.com/oYiTqum.jpeg",
-  "https://i.imgur.com/2DhmtJ4.jpeg",
-  "https://i.imgur.com/Wv3K6XK.jpeg"
-];
-
-const randImg = () => images[Math.floor(Math.random() * images.length)];
-
 /* HELPERS */
 
 const safeFetch = async (ch, id) => {
@@ -57,35 +44,39 @@ const safeChannel = async (id) => {
 
 function captEmbed(e) {
   const list = e.users.length
-    ? e.users.map((u, i) => `${i + 1}. <@${u.id}> • ${u.nick}`).join('\n')
-    : 'Пусто';
+    ? e.users.map((u, i) => `**${i + 1}.** <@${u.id}> • \`${u.nick}\``).join('\n')
+    : '😴 *Пусто...*';
 
   return new EmbedBuilder()
-    .setColor(0x00ff00)
-    .setImage(randImg())
+    .setColor(0x00ff99)
     .setDescription(
-      `# ${e.title}\n\nДата: ${e.date}\nСтатус: ${e.closed ? '🔴 Закрыт' : '🟢 Открыт'}\n\nУчастники (${e.users.length}/${e.max})\n\n${list}`
+      `## 📌 ${e.title}\n\n` +
+      `📅 **Дата:** ${e.date}\n` +
+      `📊 **Статус:** ${e.closed ? '🔴 Закрыт' : '🟢 Открыт'}\n\n` +
+      `👥 **Участники (${e.users.length}/${e.max})**\n\n${list}`
     );
 }
 
 function famEmbed(e) {
   let txt = '';
+
   for (let i = 1; i <= e.max; i++) {
     const uid = Object.keys(e.positions).find(x => e.positions[x].pos === i);
+
     txt += uid
-      ? `🔴 ${i} — <@${uid}> | ${e.positions[uid].nick}\n`
-      : `🟢 ${i} — свободно\n`;
+      ? `🔴 **${i}** — <@${uid}> | \`${e.positions[uid].nick}\`\n`
+      : `🟢 **${i}** — *свободно*\n`;
   }
 
   return new EmbedBuilder()
-    .setTitle('Фам капт')
-    .setImage(randImg())
+    .setColor(0x5865F2)
+    .setTitle('🎯 Распределение позиций')
     .setDescription(txt);
 }
 
 /* READY */
 
-client.once(Events.ClientReady, () => console.log('READY'));
+client.once(Events.ClientReady, () => console.log('✅ BOT READY'));
 
 /* INTERACTIONS */
 
@@ -97,6 +88,8 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isChatInputCommand()) {
 
       const id = Date.now().toString();
+
+      /* КАПТ */
 
       if (i.commandName === 'капт') {
 
@@ -111,9 +104,9 @@ client.on(Events.InteractionCreate, async (i) => {
         };
 
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
+          new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕ Войти').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 Выйти').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒 Закрыть').setStyle(ButtonStyle.Primary)
         );
 
         const msg = await i.reply({
@@ -125,6 +118,8 @@ client.on(Events.InteractionCreate, async (i) => {
         data[id].messageId = msg.id;
         save();
       }
+
+      /* ФАМ КАПТ */
 
       if (i.commandName === 'фамкапт') {
 
@@ -140,9 +135,9 @@ client.on(Events.InteractionCreate, async (i) => {
         };
 
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
+          new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕ Войти').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 Выйти').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒 Закрыть').setStyle(ButtonStyle.Primary)
         );
 
         const msg = await i.reply({
@@ -152,7 +147,7 @@ client.on(Events.InteractionCreate, async (i) => {
         });
 
         const thread = await msg.startThread({
-          name: 'фам капт',
+          name: '🎯 позиции',
           type: 12
         });
 
@@ -160,8 +155,8 @@ client.on(Events.InteractionCreate, async (i) => {
           embeds: [famEmbed(data[id])],
           components: [
             new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯').setStyle(ButtonStyle.Primary),
-              new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary)
+              new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯 Выбрать позицию').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 Выйти').setStyle(ButtonStyle.Secondary)
             )
           ]
         });
@@ -185,11 +180,11 @@ client.on(Events.InteractionCreate, async (i) => {
       if (a === 'join') {
 
         if (e.closed)
-          return i.reply({ content: 'Закрыто', ephemeral: true });
+          return i.reply({ content: '🔒 Капт закрыт', ephemeral: true });
 
         const modal = new ModalBuilder()
           .setCustomId(`nick_${id}`)
-          .setTitle('Ник');
+          .setTitle('📝 Ввод ника');
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(
@@ -219,7 +214,7 @@ client.on(Events.InteractionCreate, async (i) => {
           if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
         }
 
-        return i.reply({ content: 'Ты вышел', ephemeral: true });
+        return i.reply({ content: '🚪 Ты вышел', ephemeral: true });
       }
 
       if (a === 'close') {
@@ -229,20 +224,20 @@ client.on(Events.InteractionCreate, async (i) => {
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Обновлено', ephemeral: true });
+        return i.reply({ content: '🔄 Обновлено', ephemeral: true });
       }
 
       if (a === 'pos') {
 
         const modal = new ModalBuilder()
           .setCustomId(`pos_${id}`)
-          .setTitle('Позиция');
+          .setTitle('🎯 Выбор позиции');
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('pos')
-              .setLabel('Введите позицию')
+              .setLabel('Только цифра (например: 3)')
               .setStyle(TextInputStyle.Short)
           )
         );
@@ -261,12 +256,15 @@ client.on(Events.InteractionCreate, async (i) => {
 
       if (t === 'nick') {
 
-        if (e.users.find(u => u.id === i.user.id))
-          return i.reply({ content: 'Ты уже в списке', ephemeral: true });
-
         const nick = i.fields.getTextInputValue('nick');
 
-        e.users.push({ id: i.user.id, nick });
+        const existing = e.users.find(u => u.id === i.user.id);
+
+        if (existing) {
+          existing.nick = nick; // фикс undefined
+        } else {
+          e.users.push({ id: i.user.id, nick });
+        }
 
         if (e.threadId) {
           const thread = await safeChannel(e.threadId);
@@ -278,22 +276,32 @@ client.on(Events.InteractionCreate, async (i) => {
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Добавлен', ephemeral: true });
+        return i.reply({ content: '✅ Добавлен', ephemeral: true });
       }
 
       if (t === 'pos') {
 
-        const pos = parseInt(i.fields.getTextInputValue('pos'));
+        const input = i.fields.getTextInputValue('pos');
+
+        if (!/^\d+$/.test(input))
+          return i.reply({ content: '❌ Только цифры!', ephemeral: true });
+
+        const pos = parseInt(input);
+
+        if (pos < 1 || pos > e.max)
+          return i.reply({ content: '❌ Вне диапазона', ephemeral: true });
 
         if (e.positions[i.user.id])
-          return i.reply({ content: 'У тебя уже есть позиция', ephemeral: true });
+          return i.reply({ content: '❌ У тебя уже есть позиция', ephemeral: true });
 
         if (Object.values(e.positions).find(x => x.pos === pos))
-          return i.reply({ content: 'Занято', ephemeral: true });
+          return i.reply({ content: '❌ Занято', ephemeral: true });
+
+        const user = e.users.find(u => u.id === i.user.id);
 
         e.positions[i.user.id] = {
           pos,
-          nick: e.users.find(u => u.id === i.user.id)?.nick
+          nick: user ? user.nick : 'no-nick'
         };
 
         save();
@@ -303,7 +311,7 @@ client.on(Events.InteractionCreate, async (i) => {
 
         await tmsg.edit({ embeds: [famEmbed(e)] });
 
-        return i.reply({ content: 'Позиция занята', ephemeral: true });
+        return i.reply({ content: `✅ Позиция ${pos} занята`, ephemeral: true });
       }
     }
 
@@ -317,14 +325,14 @@ client.on(Events.InteractionCreate, async (i) => {
 const commands = [
   new SlashCommandBuilder()
     .setName('капт')
-    .setDescription('капт')
+    .setDescription('создать капт')
     .addStringOption(o => o.setName('название').setDescription('название').setRequired(true))
     .addStringOption(o => o.setName('дата').setDescription('дата').setRequired(true))
     .addIntegerOption(o => o.setName('колво').setDescription('колво').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('фамкапт')
-    .setDescription('фам капт')
+    .setDescription('создать фам капт')
     .addStringOption(o => o.setName('название').setDescription('название').setRequired(true))
     .addStringOption(o => o.setName('дата').setDescription('дата').setRequired(true))
     .addIntegerOption(o => o.setName('колво').setDescription('колво').setRequired(true))
