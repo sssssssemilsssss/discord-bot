@@ -16,125 +16,75 @@ const {
 
 const fs = require('fs');
 
-/* ───── CONFIG ───── */
-
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = '1438878652250198069';
 const GUILD_ID = '1073591307487948833';
 
-if (!TOKEN) {
-  console.log("❌ TOKEN NOT FOUND");
-  process.exit(1);
-}
-
-/* ───── CLIENT ───── */
-
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
-
-/* ───── DATA ───── */
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 let data = {};
 if (fs.existsSync('data.json')) {
-  try {
-    data = JSON.parse(fs.readFileSync('data.json'));
-  } catch {
-    data = {};
-  }
+  try { data = JSON.parse(fs.readFileSync('data.json')); } catch {}
 }
+const save = () => fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 
-const save = () =>
-  fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
+/* HELPERS */
+const safeFetch = async (ch, id) => { try { return await ch.messages.fetch(id); } catch {} };
+const safeChannel = async (id) => { try { return await client.channels.fetch(id); } catch {} };
 
-/* ───── HELPERS ───── */
-
-async function safeFetch(channel, id) {
-  try {
-    return await channel.messages.fetch(id);
-  } catch {
-    return null;
-  }
-}
-
-async function safeChannel(id) {
-  try {
-    return await client.channels.fetch(id);
-  } catch {
-    return null;
-  }
-}
-
-/* ───── EMBEDS ───── */
+/* EMBEDS */
 
 function captEmbed(e) {
-  const users = e.users || [];
-
-  const list = users.length
-    ? users.map((u, i) => `${i + 1}. <@${u.id}> • ${u.nick}`).join('\n')
+  const list = e.users.length
+    ? e.users.map((u, i) => `${i + 1}. <@${u.id}> • ${u.nick}`).join('\n')
     : 'Пусто';
 
   return new EmbedBuilder()
     .setColor(0x00ff00)
     .setDescription(
-      `# ${e.title}\n\n` +
-      `**Создал:** <@${e.owner}>\n` +
-      `**Дата:** ${e.date}\n` +
-      `**Статус:** ${e.closed ? "🔴 Закрыт" : "🟢 Открыт"}\n\n` +
-      `**Участники (${users.length}/${e.max})**\n\n` +
-      list
+      `# ${e.title}\n\nДата: ${e.date}\nСтатус: ${e.closed ? '🔴 Закрыт' : '🟢 Открыт'}\n\nУчастники (${e.users.length}/${e.max})\n\n${list}`
     );
 }
 
 function famEmbed(e) {
-  const pos = e.positions || {};
-
-  let text = '';
+  let txt = '';
   for (let i = 1; i <= e.max; i++) {
-    const uid = Object.keys(pos).find(id => pos[id].pos === i);
-    text += uid
-      ? `🔴 ${i} — <@${uid}> | ${pos[uid].nick}\n`
+    const uid = Object.keys(e.positions).find(x => e.positions[x].pos === i);
+    txt += uid
+      ? `🔴 ${i} — <@${uid}> | ${e.positions[uid].nick}\n`
       : `🟢 ${i} — свободно\n`;
   }
-
-  return new EmbedBuilder()
-    .setColor(0x2b2d31)
-    .setTitle("Фам капт")
-    .setDescription(text);
+  return new EmbedBuilder().setTitle('Фам капт').setDescription(txt);
 }
 
-/* ───── READY ───── */
+/* READY */
 
-client.once(Events.ClientReady, () => {
-  console.log(`✅ Logged as ${client.user.tag}`);
-});
+client.once(Events.ClientReady, () => console.log('READY'));
 
-/* ───── INTERACTIONS ───── */
+/* INTERACTIONS */
 
 client.on(Events.InteractionCreate, async (i) => {
   try {
 
-    /* ───── SLASH ───── */
+    /* SLASH */
 
     if (i.isChatInputCommand()) {
 
-      /* CAPT (NO THREAD) */
-      if (i.commandName === 'капт') {
+      if (i.commandName === 'фамкапт') {
 
         const id = Date.now().toString();
 
         data[id] = {
-          type: 'capt',
           owner: i.user.id,
           title: i.options.getString('название'),
           date: i.options.getString('дата'),
           max: i.options.getInteger('колво'),
           users: [],
-          closed: false,
-          messageId: null
+          positions: {},
+          closed: false
         };
 
-        const row = new ActionRowBuilder().addComponents(
+        const mainRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`join_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪').setStyle(ButtonStyle.Secondary),
           new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
@@ -143,60 +93,23 @@ client.on(Events.InteractionCreate, async (i) => {
 
         const msg = await i.reply({
           embeds: [captEmbed(data[id])],
-          components: [row],
-          fetchReply: true
-        });
-
-        data[id].messageId = msg.id;
-        save();
-      }
-
-      /* FAM CAPT (WITH THREAD) */
-      if (i.commandName === 'фамкапт') {
-
-        const id = Date.now().toString();
-
-        data[id] = {
-          type: 'fam',
-          owner: i.user.id,
-          title: i.options.getString('название'),
-          date: i.options.getString('дата'),
-          max: i.options.getInteger('колво'),
-          users: [],
-          positions: {},
-          closed: false,
-          messageId: null,
-          threadId: null,
-          threadMsgId: null
-        };
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`fjoin_${id}`).setLabel('➕').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`remove_${id}`).setLabel('❌').setStyle(ButtonStyle.Danger),
-          new ButtonBuilder().setCustomId(`close_${id}`).setLabel('🔒').setStyle(ButtonStyle.Primary)
-        );
-
-        const msg = await i.reply({
-          embeds: [captEmbed(data[id])],
-          components: [row],
+          components: [mainRow],
           fetchReply: true
         });
 
         const thread = await msg.startThread({
-          name: "фам капт",
-          autoArchiveDuration: 60
+          name: 'фам капт',
+          type: 12
         });
+
+        const threadRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`pos_${id}`).setLabel('🎯 позиция').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`leave_${id}`).setLabel('🚪 выйти').setStyle(ButtonStyle.Secondary)
+        );
 
         const tmsg = await thread.send({
           embeds: [famEmbed(data[id])],
-          components: [
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`fpos_${id}`)
-                .setLabel('🎯 позиция')
-                .setStyle(ButtonStyle.Primary)
-            )
-          ]
+          components: [threadRow]
         });
 
         data[id].messageId = msg.id;
@@ -207,7 +120,7 @@ client.on(Events.InteractionCreate, async (i) => {
       }
     }
 
-    /* ───── BUTTONS ───── */
+    /* BUTTONS */
 
     if (i.isButton()) {
 
@@ -218,12 +131,13 @@ client.on(Events.InteractionCreate, async (i) => {
       const isOwner = i.user.id === e.owner;
 
       /* JOIN */
-      if (a === 'join' || a === 'fjoin') {
+
+      if (a === 'join') {
 
         if (e.closed)
           return i.reply({ content: 'Закрыто', ephemeral: true });
 
-        const modal = new ModalBuilder()
+        const m = new ModalBuilder()
           .setCustomId(`nick_${id}`)
           .setTitle('Ник');
 
@@ -232,31 +146,50 @@ client.on(Events.InteractionCreate, async (i) => {
           .setLabel('Введите ник')
           .setStyle(TextInputStyle.Short);
 
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        m.addComponents(new ActionRowBuilder().addComponents(input));
+        return i.showModal(m);
+      }
 
-        return i.showModal(modal);
+      /* LEAVE (ГЛОБАЛЬНЫЙ) */
+
+      if (a === 'leave') {
+
+        e.users = e.users.filter(u => u.id !== i.user.id);
+        delete e.positions[i.user.id];
+
+        save();
+
+        const msg = await safeFetch(i.channel, e.messageId);
+        if (msg) await msg.edit({ embeds: [captEmbed(e)] });
+
+        const thread = await safeChannel(e.threadId);
+        const tmsg = await thread?.messages.fetch(e.threadMsgId);
+        if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
+
+        return i.reply({ content: 'Ты вышел', ephemeral: true });
       }
 
       /* REMOVE */
+
       if (a === 'remove') {
         if (!isOwner)
           return i.reply({ content: 'Нет прав', ephemeral: true });
 
-        const modal = new ModalBuilder()
+        const m = new ModalBuilder()
           .setCustomId(`remove_${id}`)
-          .setTitle('Удалить по номеру');
+          .setTitle('Удалить');
 
         const input = new TextInputBuilder()
           .setCustomId('num')
-          .setLabel('Номер участника')
+          .setLabel('Номер')
           .setStyle(TextInputStyle.Short);
 
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-        return i.showModal(modal);
+        m.addComponents(new ActionRowBuilder().addComponents(input));
+        return i.showModal(m);
       }
 
       /* CLOSE */
+
       if (a === 'close') {
         if (!isOwner)
           return i.reply({ content: 'Нет прав', ephemeral: true });
@@ -267,14 +200,15 @@ client.on(Events.InteractionCreate, async (i) => {
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Статус изменён', ephemeral: true });
+        return i.reply({ content: 'Обновлено', ephemeral: true });
       }
 
-      /* FPOS ONLY IN THREAD */
-      if (a === 'fpos') {
+      /* POSITION */
 
-        const modal = new ModalBuilder()
-          .setCustomId(`fpos_${id}`)
+      if (a === 'pos') {
+
+        const m = new ModalBuilder()
+          .setCustomId(`pos_${id}`)
           .setTitle('Позиция');
 
         const input = new TextInputBuilder()
@@ -282,21 +216,21 @@ client.on(Events.InteractionCreate, async (i) => {
           .setLabel('Введите позицию')
           .setStyle(TextInputStyle.Short);
 
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-        return i.showModal(modal);
+        m.addComponents(new ActionRowBuilder().addComponents(input));
+        return i.showModal(m);
       }
     }
 
-    /* ───── MODALS ───── */
+    /* MODALS */
 
     if (i.isModalSubmit()) {
 
       const [t, id] = i.customId.split('_');
       const e = data[id];
-      if (!e) return i.reply({ content: 'Нет данных', ephemeral: true });
+      if (!e) return;
 
       /* JOIN */
+
       if (t === 'nick') {
 
         const nick = i.fields.getTextInputValue('nick');
@@ -305,24 +239,27 @@ client.on(Events.InteractionCreate, async (i) => {
           return i.reply({ content: 'Ты уже в списке', ephemeral: true });
 
         e.users.push({ id: i.user.id, nick });
+
+        const thread = await safeChannel(e.threadId);
+        await thread.members.add(i.user.id).catch(() => {});
+
         save();
 
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        return i.reply({ content: 'Добавлен', ephemeral: true });
+        return i.reply({ content: 'Ты добавлен', ephemeral: true });
       }
 
       /* REMOVE */
+
       if (t === 'remove') {
 
         const num = parseInt(i.fields.getTextInputValue('num'));
         const user = e.users[num - 1];
+        if (!user) return i.reply({ content: 'Ошибка', ephemeral: true });
 
-        if (!user)
-          return i.reply({ content: 'Нет такого', ephemeral: true });
-
-        delete e.positions?.[user.id]; // анти-чит очистка позиции
+        delete e.positions[user.id];
         e.users.splice(num - 1, 1);
 
         save();
@@ -330,79 +267,55 @@ client.on(Events.InteractionCreate, async (i) => {
         const msg = await safeFetch(i.channel, e.messageId);
         if (msg) await msg.edit({ embeds: [captEmbed(e)] });
 
-        const thread = await safeChannel(e.threadId);
-        const tmsg = await thread?.messages.fetch(e.threadMsgId);
-
-        if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
-
         return i.reply({ content: 'Удалён', ephemeral: true });
       }
 
-      /* FPOS ANTI-CHEAT */
-      if (t === 'fpos') {
+      /* POSITION */
+
+      if (t === 'pos') {
 
         const pos = parseInt(i.fields.getTextInputValue('pos'));
 
         if (isNaN(pos) || pos < 1 || pos > e.max)
-          return i.reply({ content: 'Ошибка позиции', ephemeral: true });
+          return i.reply({ content: 'Ошибка', ephemeral: true });
 
-        const alreadyHasPos = Object.values(e.positions || {})
-          .find(x => x.id === i.user.id);
+        if (e.positions[i.user.id])
+          return i.reply({ content: 'У тебя уже есть позиция', ephemeral: true });
 
-        if (alreadyHasPos)
-          return i.reply({ content: 'Ты уже занял позицию', ephemeral: true });
-
-        if (Object.values(e.positions || {})
-          .find(x => x.pos === pos))
-          return i.reply({ content: 'Позиция занята', ephemeral: true });
+        if (Object.values(e.positions).find(x => x.pos === pos))
+          return i.reply({ content: 'Занято', ephemeral: true });
 
         e.positions[i.user.id] = {
           pos,
-          nick: e.users.find(u => u.id === i.user.id)?.nick || 'no-nick',
-          id: i.user.id
+          nick: e.users.find(u => u.id === i.user.id)?.nick
         };
 
         save();
 
         const thread = await safeChannel(e.threadId);
-        const tmsg = await thread?.messages.fetch(e.threadMsgId);
+        const tmsg = await thread.messages.fetch(e.threadMsgId);
 
-        if (tmsg) await tmsg.edit({ embeds: [famEmbed(e)] });
+        await tmsg.edit({ embeds: [famEmbed(e)] });
 
-        return i.reply({ content: `Позиция ${pos} занята`, ephemeral: true });
+        return i.reply({ content: 'Позиция занята', ephemeral: true });
       }
     }
 
-  } catch (err) {
-    console.log("ERROR:", err);
+  } catch (e) {
+    console.log(e);
   }
 });
 
-/* ───── COMMANDS ───── */
+/* COMMANDS */
 
 const commands = [
   new SlashCommandBuilder()
-    .setName('капт')
-    .setDescription('капт')
-    .addStringOption(o =>
-      o.setName('название').setDescription('название').setRequired(true))
-    .addStringOption(o =>
-      o.setName('дата').setDescription('дата').setRequired(true))
-    .addIntegerOption(o =>
-      o.setName('колво').setDescription('колво').setRequired(true)),
-
-  new SlashCommandBuilder()
     .setName('фамкапт')
     .setDescription('фам капт')
-    .addStringOption(o =>
-      o.setName('название').setDescription('название').setRequired(true))
-    .addStringOption(o =>
-      o.setName('дата').setDescription('дата').setRequired(true))
-    .addIntegerOption(o =>
-      o.setName('колво').setDescription('колво').setRequired(true))
+    .addStringOption(o => o.setName('название').setDescription('название').setRequired(true))
+    .addStringOption(o => o.setName('дата').setDescription('дата').setRequired(true))
+    .addIntegerOption(o => o.setName('колво').setDescription('колво').setRequired(true))
 ];
-
-/* ───── REGISTER ───── */
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
@@ -412,7 +325,5 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
     { body: commands }
   );
 })();
-
-/* ───── LOGIN ───── */
 
 client.login(TOKEN);
