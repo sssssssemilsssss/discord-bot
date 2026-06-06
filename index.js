@@ -310,34 +310,31 @@ client.on(Events.InteractionCreate, async i => {
 
     if (action === "pick-del") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-      await i.deferUpdate();
       c.users    = c.users.filter(x => x !== targetId);
       c.reserves = c.reserves.filter(x => x !== targetId);
       save();
       await refresh(c);
-      return i.followUp({ content: `✅ <@${targetId}> удалён из списка`, ephemeral: true });
+      return i.reply({ content: `✅ <@${targetId}> удалён из списка`, ephemeral: true });
     }
 
     if (action === "pick-reserve") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-      await i.deferUpdate();
       if (!c.users.includes(targetId))
-        return i.followUp({ content: "Пользователь не найден в основном списке", ephemeral: true });
+        return i.reply({ content: "Пользователь не найден в основном списке", ephemeral: true });
       c.users    = c.users.filter(x => x !== targetId);
       c.reserves = c.reserves.filter(x => x !== targetId);
       c.reserves.push(targetId);
       save();
       await refresh(c);
-      return i.followUp({ content: `🔄 <@${targetId}> перемещён в замену`, ephemeral: true });
+      return i.reply({ content: `🔄 <@${targetId}> перемещён в замену`, ephemeral: true });
     }
 
     if (action === "pick-deladmin") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-      await i.deferUpdate();
       c.admins = c.admins.filter(x => x !== targetId);
       save();
       await refresh(c);
-      return i.followUp({ content: `✅ <@${targetId}> убран из админов`, ephemeral: true });
+      return i.reply({ content: `✅ <@${targetId}> убран из админов`, ephemeral: true });
     }
 
     // ── Ветка ────────────────────────────────────────────────────────────────
