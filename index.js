@@ -83,7 +83,8 @@ client.on(Events.InteractionCreate, async i=>{
    title:i.options.getString("название"),
    date:i.options.getString("дата"),
    max:i.options.getInteger("колво"),
-   closed:false
+   closed:false,
+   threadId:null
   };
 
   const msg = await i.reply({
@@ -142,9 +143,21 @@ client.on(Events.InteractionCreate, async i=>{
    );
 
    const r4 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`toggle_${id}`).setLabel("Открыть/Закрыть").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`delete_${id}`).setLabel("Удалить").setStyle(ButtonStyle.Danger)
-   );
+ new ButtonBuilder()
+  .setCustomId(`thread_${id}`)
+  .setLabel("🧵 Ветка")
+  .setStyle(ButtonStyle.Primary),
+
+ new ButtonBuilder()
+  .setCustomId(`toggle_${id}`)
+  .setLabel("Открыть/Закрыть")
+  .setStyle(ButtonStyle.Secondary),
+
+ new ButtonBuilder()
+  .setCustomId(`delete_${id}`)
+  .setLabel("Удалить")
+  .setStyle(ButtonStyle.Danger)
+);
 
    return i.reply({content:"Панель управления",components:[r1,r2,r3,r4],ephemeral:true});
   }
@@ -178,7 +191,35 @@ client.on(Events.InteractionCreate, async i=>{
 
    return i.showModal(m);
   }
+  
+if(action==="thread"){
 
+ if(c.threadId){
+  return i.reply({
+   content:"❌ Ветка уже создана",
+   ephemeral:true
+  });
+ }
+
+ const modal = new ModalBuilder()
+  .setCustomId(`threadm_${id}`)
+  .setTitle("Создание ветки");
+
+ modal.addComponents(
+  new ActionRowBuilder().addComponents(
+   new TextInputBuilder()
+    .setCustomId("thread_name")
+    .setLabel("Название ветки")
+    .setPlaceholder("Например: Капт 20:00")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(100)
+  )
+ );
+
+ return i.showModal(modal);
+}
+  
   if(action==="toggle"){
    c.closed=!c.closed;
    save();
@@ -199,6 +240,7 @@ client.on(Events.InteractionCreate, async i=>{
 
  if(i.isModalSubmit()){
 
+  const value = i.fields.getTextInputValue("value");
   const [action,id] = i.customId.split("_");
   const c = data[id];
   if(!c) return;
@@ -234,6 +276,18 @@ client.on(Events.InteractionCreate, async i=>{
    c.users = c.users.filter(x=>x!==value);
   }
 
+if(action==="threadm"){
+
+ if(c.threadId){
+  return i.reply({
+   content:"❌ Ветка уже существует",
+   ephemeral:true
+  });
+ }
+
+ const threadName =
+  i
+  
   save();
 
   const msg = await i.channel.messages.fetch(c.messageId).catch(()=>null);
