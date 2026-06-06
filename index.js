@@ -63,9 +63,13 @@ function mainRow(id) {
 }
 
 // ── Refresh embed ────────────────────────────────────────────────────────────
-async function refresh(channel, c) {
-  const msg = await channel.messages.fetch(c.messageId).catch(() => null);
-  if (msg) await msg.edit({ embeds: [makeEmbed(c)], components: [mainRow(c.id)] });
+async function refresh(c) {
+  try {
+    const channel = await client.channels.fetch(c.channelId).catch(() => null);
+    if (!channel) return;
+    const msg = await channel.messages.fetch(c.messageId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [makeEmbed(c)], components: [mainRow(c.id)] });
+  } catch {}
 }
 
 // ── Build user-picker rows (кнопки с именами участников) ─────────────────────
@@ -126,9 +130,10 @@ client.on(Events.InteractionCreate, async i => {
       reserves: [],
       title:    i.options.getString("название"),
       date:     i.options.getString("дата"),
-      closed:   false,
-      threadId: null,
-      messageId: null
+      closed:    false,
+      threadId:  null,
+      messageId: null,
+      channelId: i.channelId
     };
 
     const msg = await i.reply({
@@ -166,7 +171,7 @@ client.on(Events.InteractionCreate, async i => {
         return i.reply({ content: "Вы уже в списке", ephemeral: true });
       c.users.push(i.user.id);
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: "✅ Вы записаны!", ephemeral: true });
     }
 
@@ -178,7 +183,7 @@ client.on(Events.InteractionCreate, async i => {
       c.users    = c.users.filter(x => x !== i.user.id);
       c.reserves = c.reserves.filter(x => x !== i.user.id);
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: "Вы вышли из списка", ephemeral: true });
     }
 
@@ -305,31 +310,34 @@ client.on(Events.InteractionCreate, async i => {
 
     if (action === "pick-del") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
+      await i.deferUpdate();
       c.users    = c.users.filter(x => x !== targetId);
       c.reserves = c.reserves.filter(x => x !== targetId);
       save();
-      await refresh(i.channel, c);
-      return i.reply({ content: `✅ <@${targetId}> удалён из списка`, ephemeral: true });
+      await refresh(c);
+      return i.followUp({ content: `✅ <@${targetId}> удалён из списка`, ephemeral: true });
     }
 
     if (action === "pick-reserve") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
+      await i.deferUpdate();
       if (!c.users.includes(targetId))
-        return i.reply({ content: "Пользователь не найден в основном списке", ephemeral: true });
+        return i.followUp({ content: "Пользователь не найден в основном списке", ephemeral: true });
       c.users    = c.users.filter(x => x !== targetId);
       c.reserves = c.reserves.filter(x => x !== targetId);
       c.reserves.push(targetId);
       save();
-      await refresh(i.channel, c);
-      return i.reply({ content: `🔄 <@${targetId}> перемещён в замену`, ephemeral: true });
+      await refresh(c);
+      return i.followUp({ content: `🔄 <@${targetId}> перемещён в замену`, ephemeral: true });
     }
 
     if (action === "pick-deladmin") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
+      await i.deferUpdate();
       c.admins = c.admins.filter(x => x !== targetId);
       save();
-      await refresh(i.channel, c);
-      return i.reply({ content: `✅ <@${targetId}> убран из админов`, ephemeral: true });
+      await refresh(c);
+      return i.followUp({ content: `✅ <@${targetId}> убран из админов`, ephemeral: true });
     }
 
     // ── Ветка ────────────────────────────────────────────────────────────────
@@ -357,7 +365,7 @@ client.on(Events.InteractionCreate, async i => {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
       c.closed = !c.closed;
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: `Капт теперь ${c.closed ? "закрыт 🔒" : "открыт 🔓"}`, ephemeral: true });
     }
 
@@ -389,14 +397,14 @@ client.on(Events.InteractionCreate, async i => {
     if (action === "modal-title") {
       c.title = val;
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: "✅ Название обновлено", ephemeral: true });
     }
 
     if (action === "modal-time") {
       c.date = val;
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: "✅ Время обновлено", ephemeral: true });
     }
 
@@ -409,7 +417,7 @@ client.on(Events.InteractionCreate, async i => {
         return i.reply({ content: "Этот пользователь уже в списке", ephemeral: true });
       c.users.push(uid);
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: `✅ <@${uid}> добавлен в список`, ephemeral: true });
     }
 
@@ -420,7 +428,7 @@ client.on(Events.InteractionCreate, async i => {
         return i.reply({ content: "❌ Введите числовой ID пользователя", ephemeral: true });
       if (!c.admins.includes(uid)) c.admins.push(uid);
       save();
-      await refresh(i.channel, c);
+      await refresh(c);
       return i.reply({ content: `✅ <@${uid}> добавлен как админ`, ephemeral: true });
     }
 
@@ -429,7 +437,9 @@ client.on(Events.InteractionCreate, async i => {
       if (c.threadId)
         return i.reply({ content: "❌ Ветка уже существует", ephemeral: true });
 
-      const msg = await i.channel.messages.fetch(c.messageId).catch(() => null);
+      const threadChannel = await client.channels.fetch(c.channelId).catch(() => null);
+      if (!threadChannel) return i.reply({ content: "Не удалось найти канал капта", ephemeral: true });
+      const msg = await threadChannel.messages.fetch(c.messageId).catch(() => null);
       if (!msg) return i.reply({ content: "Не удалось найти сообщение капта", ephemeral: true });
 
       const thread = await msg.startThread({ name: val, autoArchiveDuration: 1440 }).catch(() => null);
