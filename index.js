@@ -9,9 +9,9 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 
-const TOKEN = process.env.TOKEN;
+const TOKEN     = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
+const GUILD_ID  = process.env.GUILD_ID;
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -24,26 +24,39 @@ function save() {
   fs.writeFileSync("data.json", JSON.stringify(data, null, 2));
 }
 
+// Вытащить user ID из упоминания <@123456> или просто числа
+function parseUserId(raw) {
+  const match = raw.trim().match(/^<@!?(\d+)>$|^(\d+)$/);
+  return match ? (match[1] || match[2]) : null;
+}
+
 function makeEmbed(c) {
   const admins = c.admins.length
     ? c.admins.map(x => `<@${x}>`).join(", ")
     : "Нет";
 
-  const users = c.users.length
-    ? c.users.map((u, i) => `${i + 1}. <@${u}>`).join("\n")
+  const mainUsers = c.users.length
+    ? c.users.map((u, idx) => `${idx + 1}. <@${u}>`).join("\n")
     : "Пока никто не записался";
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor("#5865F2")
     .setTitle(`🎯 ${c.title}`)
-    .setDescription(users)
+    .setDescription(mainUsers)
     .addFields(
-      { name: "📅 Время", value: c.date, inline: true },
-      { name: "👥 Участники", value: `${c.users.length}/${c.max}`, inline: true },
-      { name: "📊 Статус", value: c.closed ? "Закрыт" : "Открыт", inline: true },
-      { name: "🛡 Админы", value: admins }
-    )
-    .setTimestamp();
+      { name: "📅 Время",    value: c.date,                         inline: true },
+      { name: "👥 Участники", value: `${c.users.length}`,            inline: true },
+      { name: "📊 Статус",   value: c.closed ? "Закрыт" : "Открыт", inline: true },
+      { name: "🛡 Админы",   value: admins }
+    );
+
+  if (c.reserves && c.reserves.length > 0) {
+    const reserveList = c.reserves.map((u, idx) => `${idx + 1}. <@${u}>`).join("\n");
+    embed.addFields({ name: "🔄 Замена", value: reserveList });
+  }
+
+  embed.setTimestamp();
+  return embed;
 }
 
 function mainRow(id) {
@@ -55,10 +68,12 @@ function mainRow(id) {
 }
 
 async function refresh(msg, c) {
-  await msg.edit({
-    embeds: [makeEmbed(c)],
-    components: [mainRow(c.id)]
-  });
+  await msg.edit({ embeds: [makeEmbed(c)], components: [mainRow(c.id)] });
+}
+
+// Вспомогательная функция — получить сообщение капта по любому channel-like объекту
+async function fetchCaptMsg(channel, c) {
+  return channel.messages.fetch(c.messageId).catch(() => null);
 }
 
 client.once(Events.ClientReady, () => console.log("READY"));
@@ -71,18 +86,18 @@ client.on(Events.InteractionCreate, async i => {
 
     data[id] = {
       id,
-      owner: i.user.id,
-      admins: [],
-      users: [],
-      title: i.options.getString("название"),
-      date: i.options.getString("дата"),
-      max: i.options.getInteger("колво"),
-      closed: false,
+      owner:    i.user.id,
+      admins:   [],
+      users:    [],
+      reserves: [],          // список замены
+      title:    i.options.getString("название"),
+      date:     i.options.getString("дата"),
+      closed:   false,
       threadId: null
     };
 
     const msg = await i.reply({
-      embeds: [makeEmbed(data[id])],
+      embeds:     [makeEmbed(data[id])],
       components: [mainRow(id)],
       fetchReply: true
     });
@@ -94,31 +109,37 @@ client.on(Events.InteractionCreate, async i => {
 
   // ── Buttons ────────────────────────────────────────────────────────────────
   if (i.isButton()) {
-    const [action, id] = i.customId.split("_");
-    const c = data[id];
+    const parts  = i.customId.split("_");
+    const action = parts[0];
+    const id     = parts[1];
+    const c      = data[id];
     if (!c) return;
 
     // Записаться
     if (action === "join") {
-      if (c.closed) return i.reply({ content: "Капт закрыт", ephemeral: true });
+      if (c.closed)
+        return i.reply({ content: "Капт закрыт", ephemeral: true });
       if (c.users.includes(i.user.id))
         return i.reply({ content: "Вы уже записаны", ephemeral: true });
-      // FIX: проверка лимита
-      if (c.users.length >= c.max)
-        return i.reply({ content: "Мест больше нет", ephemeral: true });
 
       c.users.push(i.user.id);
       save();
       await refresh(i.message, c);
-      return i.reply({ content: "Записаны", ephemeral: true });
+      return i.reply({ content: "✅ Вы записаны!", ephemeral: true });
     }
 
     // Покинуть
     if (action === "leave") {
-      c.users = c.users.filter(x => x !== i.user.id);
+      const wasUser    = c.users.includes(i.user.id);
+      const wasReserve = c.reserves.includes(i.user.id);
+      if (!wasUser && !wasReserve)
+        return i.reply({ content: "Вас нет в списке", ephemeral: true });
+
+      c.users    = c.users.filter(x => x !== i.user.id);
+      c.reserves = c.reserves.filter(x => x !== i.user.id);
       save();
       await refresh(i.message, c);
-      return i.reply({ content: "Вы вышли", ephemeral: true });
+      return i.reply({ content: "Вы вышли из списка", ephemeral: true });
     }
 
     const canManage = c.owner === i.user.id || c.admins.includes(i.user.id);
@@ -128,9 +149,8 @@ client.on(Events.InteractionCreate, async i => {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
 
       const r1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`title_${id}`).setLabel("Название").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`time_${id}`).setLabel("Время").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`limit_${id}`).setLabel("Лимит").setStyle(ButtonStyle.Primary)
+        new ButtonBuilder().setCustomId(`title_${id}`).setLabel("✏️ Название").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`time_${id}`).setLabel("🕐 Время").setStyle(ButtonStyle.Primary)
       );
 
       const r2 = new ActionRowBuilder().addComponents(
@@ -140,41 +160,42 @@ client.on(Events.InteractionCreate, async i => {
 
       const r3 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`adduser_${id}`).setLabel("➕ Участник").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`deluser_${id}`).setLabel("➖ Участник").setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId(`deluser_${id}`).setLabel("➖ Участник").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`reserve_${id}`).setLabel("🔄 Замена").setStyle(ButtonStyle.Secondary)
       );
 
       const r4 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`thread_${id}`).setLabel("🧵 Ветка").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`toggle_${id}`).setLabel("Открыть/Закрыть").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`delete_${id}`).setLabel("Удалить").setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId(`delete_${id}`).setLabel("🗑 Удалить").setStyle(ButtonStyle.Danger)
       );
 
-      return i.reply({ content: "Панель управления", components: [r1, r2, r3, r4], ephemeral: true });
+      return i.reply({ content: "⚙️ Панель управления", components: [r1, r2, r3, r4], ephemeral: true });
     }
 
-    // Кнопки, открывающие модальные окна
-    const modalActions = ["title", "time", "limit", "addadmin", "deladmin", "adduser", "deluser"];
+    // Модальные кнопки
+    const modalMap = {
+      title:    { title: "Изменить название",  label: "Новое название",                        hint: "Например: Капт субботы" },
+      time:     { title: "Изменить время",     label: "Новое время/дата",                      hint: "Например: Суббота 20:00" },
+      addadmin: { title: "Добавить админа",    label: "Упомяните пользователя (@ник или ID)",  hint: "@username или 123456789" },
+      deladmin: { title: "Убрать админа",      label: "Упомяните пользователя (@ник или ID)",  hint: "@username или 123456789" },
+      adduser:  { title: "Добавить участника", label: "Упомяните участника (@ник или ID)",     hint: "@username или 123456789" },
+      deluser:  { title: "Убрать участника",   label: "Упомяните участника (@ник или ID)",     hint: "@username или 123456789" },
+      reserve:  { title: "Управление заменой", label: "Упомяните (@ник или ID) — добавить/убрать из замены", hint: "@username или 123456789" }
+    };
 
-    if (modalActions.includes(action)) {
-      const labels = {
-        title: "Новое название",
-        time: "Новое время",
-        limit: "Новый лимит",
-        addadmin: "ID пользователя",
-        deladmin: "ID пользователя",
-        adduser: "ID пользователя",
-        deluser: "ID пользователя"
-      };
-
+    if (modalMap[action]) {
+      const cfg = modalMap[action];
       const m = new ModalBuilder()
         .setCustomId(`${action}m_${id}`)
-        .setTitle("Редактирование");
+        .setTitle(cfg.title);
 
       m.addComponents(
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("value")
-            .setLabel(labels[action])
+            .setLabel(cfg.label)
+            .setPlaceholder(cfg.hint)
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
         )
@@ -186,10 +207,7 @@ client.on(Events.InteractionCreate, async i => {
     // Создать ветку
     if (action === "thread") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-
-      if (c.threadId) {
-        return i.reply({ content: "❌ Ветка уже создана", ephemeral: true });
-      }
+      if (c.threadId)  return i.reply({ content: "❌ Ветка уже создана", ephemeral: true });
 
       const modal = new ModalBuilder()
         .setCustomId(`threadm_${id}`)
@@ -215,38 +233,36 @@ client.on(Events.InteractionCreate, async i => {
       c.closed = !c.closed;
       save();
       await refresh(i.message, c);
-      return i.reply({ content: "Статус изменён", ephemeral: true });
+      return i.reply({ content: `Капт теперь ${c.closed ? "закрыт 🔒" : "открыт 🔓"}`, ephemeral: true });
     }
 
     // Удалить
     if (action === "delete") {
       if (i.user.id !== c.owner)
-        return i.reply({ content: "Только владелец", ephemeral: true });
+        return i.reply({ content: "Только владелец может удалить капт", ephemeral: true });
 
       delete data[id];
       save();
       await i.message.delete().catch(() => {});
-      return i.reply({ content: "Удалено", ephemeral: true });
+      return i.reply({ content: "Капт удалён", ephemeral: true });
     }
   }
 
   // ── Modal submits ──────────────────────────────────────────────────────────
   if (i.isModalSubmit()) {
-    // FIX: убрано дублирование — одна переменная value объявляется ниже по нужде
-    const [action, id] = i.customId.split("_");
-    const c = data[id];
+    const parts  = i.customId.split("_");
+    const action = parts[0];
+    const id     = parts[1];
+    const c      = data[id];
     if (!c) return;
 
-    // FIX: ветка треда использует другой input id
+    // Создание ветки
     if (action === "threadm") {
-      if (c.threadId) {
+      if (c.threadId)
         return i.reply({ content: "❌ Ветка уже существует", ephemeral: true });
-      }
 
-      // FIX: восстановлена полная логика создания треда
       const threadName = i.fields.getTextInputValue("thread_name");
-
-      const msg = await i.channel.messages.fetch(c.messageId).catch(() => null);
+      const msg = await fetchCaptMsg(i.channel, c);
       if (!msg) return i.reply({ content: "Не удалось найти сообщение капта", ephemeral: true });
 
       const thread = await msg.startThread({
@@ -259,51 +275,73 @@ client.on(Events.InteractionCreate, async i => {
       c.threadId = thread.id;
       save();
 
-      // Упомянуть всех участников внутри ветки
-      if (c.users.length > 0) {
-        const mentions = c.users.map(u => `<@${u}>`).join(" ");
-        await thread.send(`👥 Участники капта: ${mentions}`).catch(() => {});
+      // Упомянуть всех участников + замену
+      const allMentions = [
+        ...c.users,
+        ...(c.reserves || [])
+      ].map(u => `<@${u}>`).join(" ");
+
+      if (allMentions) {
+        await thread.send(`👥 Участники капта: ${allMentions}`).catch(() => {});
       }
 
       return i.reply({ content: `🧵 Ветка создана: <#${thread.id}>`, ephemeral: true });
     }
 
-    // Все остальные модальные формы используют input "value"
-    const value = i.fields.getTextInputValue("value");
+    // Остальные модальные формы
+    const raw   = i.fields.getTextInputValue("value");
+    const value = raw.trim();
 
-    if (action === "titlem") c.title = value;
-
-    if (action === "timem") c.date = value;
-
-    if (action === "limitm") {
-      const n = parseInt(value);
-      if (isNaN(n))
-        return i.reply({ content: "Введите число", ephemeral: true });
-      c.max = n;
+    if (action === "titlem") {
+      c.title = value;
     }
 
-    if (action === "addadminm") {
-      if (!c.admins.includes(value)) c.admins.push(value);
+    if (action === "timem") {
+      c.date = value;
     }
 
-    if (action === "deladminm") {
-      c.admins = c.admins.filter(x => x !== value);
-    }
+    // Для действий с пользователями — парсим упоминание
+    const userActions = ["addadminm", "deladminm", "adduserm", "deluserm", "reservem"];
+    if (userActions.includes(action)) {
+      const userId = parseUserId(value);
+      if (!userId)
+        return i.reply({ content: "❌ Не удалось распознать пользователя. Используйте @упоминание или числовой ID.", ephemeral: true });
 
-    if (action === "adduserm") {
-      if (!c.users.includes(value)) c.users.push(value);
-    }
-
-    if (action === "deluserm") {
-      c.users = c.users.filter(x => x !== value);
+      if (action === "addadminm") {
+        if (!c.admins.includes(userId)) c.admins.push(userId);
+      }
+      if (action === "deladminm") {
+        c.admins = c.admins.filter(x => x !== userId);
+      }
+      if (action === "adduserm") {
+        if (c.users.includes(userId))
+          return i.reply({ content: "Этот участник уже в списке", ephemeral: true });
+        // Убираем из замены если там был
+        c.reserves = (c.reserves || []).filter(x => x !== userId);
+        c.users.push(userId);
+      }
+      if (action === "deluserm") {
+        c.users = c.users.filter(x => x !== userId);
+      }
+      if (action === "reservem") {
+        c.reserves = c.reserves || [];
+        if (c.reserves.includes(userId)) {
+          // Если уже в замене — убираем (toggle)
+          c.reserves = c.reserves.filter(x => x !== userId);
+        } else {
+          // Убираем из основного списка и добавляем в замену
+          c.users    = c.users.filter(x => x !== userId);
+          c.reserves.push(userId);
+        }
+      }
     }
 
     save();
 
-    const msg = await i.channel.messages.fetch(c.messageId).catch(() => null);
+    const msg = await fetchCaptMsg(i.channel, c);
     if (msg) await refresh(msg, c);
 
-    return i.reply({ content: "Сохранено", ephemeral: true });
+    return i.reply({ content: "✅ Сохранено", ephemeral: true });
   }
 });
 
@@ -313,8 +351,7 @@ const commands = [
     .setName("капт")
     .setDescription("Создать капт")
     .addStringOption(o => o.setName("название").setDescription("Название").setRequired(true))
-    .addStringOption(o => o.setName("дата").setDescription("Дата").setRequired(true))
-    .addIntegerOption(o => o.setName("колво").setDescription("Лимит").setRequired(true))
+    .addStringOption(o => o.setName("дата").setDescription("Дата/время").setRequired(true))
 ];
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
