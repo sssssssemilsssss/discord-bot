@@ -259,6 +259,12 @@ client.on(Events.InteractionCreate, async i => {
       c.threadId = thread.id;
       save();
 
+      // Упомянуть всех участников внутри ветки
+      if (c.users.length > 0) {
+        const mentions = c.users.map(u => `<@${u}>`).join(" ");
+        await thread.send(`👥 Участники капта: ${mentions}`).catch(() => {});
+      }
+
       return i.reply({ content: `🧵 Ветка создана: <#${thread.id}>`, ephemeral: true });
     }
 
