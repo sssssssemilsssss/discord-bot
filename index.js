@@ -269,9 +269,10 @@ client.on(Events.InteractionCreate, async i => {
       if (!all.length)
         return i.reply({ content: "Список пуст", ephemeral: true });
 
+      await i.deferReply({ ephemeral: true });
       await i.guild.members.fetch().catch(() => {});
       const rows = buildPickerRows("pick-del", captId, all, i.guild);
-      return i.reply({ content: "Выберите кого убрать:", components: rows, ephemeral: true });
+      return i.editReply({ content: "Выберите кого убрать:", components: rows });
     }
 
     // ── В замену — picker из основного списка ────────────────────────────
@@ -281,9 +282,10 @@ client.on(Events.InteractionCreate, async i => {
       if (!c.users.length)
         return i.reply({ content: "Основной список пуст", ephemeral: true });
 
+      await i.deferReply({ ephemeral: true });
       await i.guild.members.fetch().catch(() => {});
       const rows = buildPickerRows("pick-reserve", captId, c.users, i.guild);
-      return i.reply({ content: "Кого переместить в замену?", components: rows, ephemeral: true });
+      return i.editReply({ content: "Кого переместить в замену?", components: rows });
     }
 
     // ── Убрать админа — picker ────────────────────────────────────────────
@@ -293,9 +295,10 @@ client.on(Events.InteractionCreate, async i => {
       if (!c.admins.length)
         return i.reply({ content: "Нет админов", ephemeral: true });
 
+      await i.deferReply({ ephemeral: true });
       await i.guild.members.fetch().catch(() => {});
       const rows = buildPickerRows("pick-deladmin", captId, c.admins, i.guild);
-      return i.reply({ content: "Кого убрать из админов?", components: rows, ephemeral: true });
+      return i.editReply({ content: "Кого убрать из админов?", components: rows });
     }
 
     // ── Picker-подтверждения ──────────────────────────────────────────────
