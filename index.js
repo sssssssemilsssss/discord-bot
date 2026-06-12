@@ -1,4 +1,4 @@
-// index.js — Capture Bot Discord.js v14
+// index.js — Capture Bot + Music | Discord.js v14
 
 const {
   Client, GatewayIntentBits, EmbedBuilder,
@@ -6,13 +6,22 @@ const {
   ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, REST, Routes, Events
 } = require("discord.js");
+
+const {
+  joinVoiceChannel, createAudioPlayer, createAudioResource,
+  AudioPlayerStatus, VoiceConnectionStatus, entersState, getVoiceConnection
+} = require("@discordjs/voice");
+
+const playdl = require("play-dl");
 const fs = require("fs");
 
 const TOKEN     = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID  = process.env.GUILD_ID;
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
+});
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 let data = {};
@@ -21,6 +30,56 @@ if (fs.existsSync("data.json"))
 
 function save() {
   fs.writeFileSync("data.json", JSON.stringify(data, null, 2));
+}
+
+// ── Music state per guild ────────────────────────────────────────────────────
+// guildId => { queue: [], player, connection, current }
+const music = new Map();
+
+function getMusic(guildId) {
+  if (!music.has(guildId))
+    music.set(guildId, { queue: [], player: null, connection: null, current: null });
+  return music.get(guildId);
+}
+
+// ── Play next track in queue ─────────────────────────────────────────────────
+async function playNext(guildId) {
+  const m = getMusic(guildId);
+  if (!m.queue.length) {
+    m.current = null;
+    // Отключаемся через 5 минут тишины
+    setTimeout(() => {
+      const mc = getMusic(guildId);
+      if (!mc.current && mc.connection) {
+        mc.connection.destroy();
+        mc.connection = null;
+      }
+    }, 5 * 60 * 1000);
+    return;
+  }
+
+  const track = m.queue.shift();
+  m.current = track;
+
+  try {
+    let stream;
+
+    if (track.source === "youtube") {
+      stream = await playdl.stream(track.url, { quality: 2 });
+    } else {
+      // SoundCloud
+      stream = await playdl.stream(track.url);
+    }
+
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type
+    });
+
+    m.player.play(resource);
+  } catch (err) {
+    console.error("Ошибка воспроизведения:", err);
+    playNext(guildId); // пропускаем сломанный трек
+  }
 }
 
 // ── Embed ────────────────────────────────────────────────────────────────────
@@ -38,8 +97,8 @@ function makeEmbed(c) {
     .setTitle(`🎯 ${c.title}`)
     .setDescription(mainList)
     .addFields(
-      { name: "📅 Время",     value: c.date,                          inline: true },
-      { name: "👥 Участники", value: String(c.users.length),          inline: true },
+      { name: "📅 Время",     value: c.date,                               inline: true },
+      { name: "👥 Участники", value: String(c.users.length),               inline: true },
       { name: "📊 Статус",    value: c.closed ? "🔒 Закрыт" : "🔓 Открыт", inline: true },
       { name: "🛡 Админы",    value: admins }
     );
@@ -72,18 +131,14 @@ async function refresh(c) {
   } catch {}
 }
 
-// ── Build user-picker rows (кнопки с именами участников) ─────────────────────
-// action: строка вроде "pick-deluser", "pick-reserve", "pick-deladmin"
-// список users — массив ID
-// Discord: max 5 кнопок в строке, max 5 строк => 25 кнопок max
+// ── Build picker rows ────────────────────────────────────────────────────────
 function buildPickerRows(action, captId, userIds, guild) {
   const rows = [];
   let row = new ActionRowBuilder();
   let count = 0;
 
   for (const uid of userIds) {
-    if (count >= 25) break; // Discord hard limit
-
+    if (count >= 25) break;
     const member = guild.members.cache.get(uid);
     const label  = member ? (member.displayName || member.user.username) : uid;
 
@@ -105,10 +160,26 @@ function buildPickerRows(action, captId, userIds, guild) {
   return rows;
 }
 
+// ── Build search result buttons ──────────────────────────────────────────────
+function buildSearchRows(results, searchId) {
+  const row = new ActionRowBuilder();
+  results.forEach((track, idx) => {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`play-pick:${searchId}:${idx}`)
+        .setLabel(`${idx + 1}. ${track.title.slice(0, 60)}`)
+        .setStyle(ButtonStyle.Primary)
+    );
+  });
+  return [row];
+}
+
+// Временное хранилище результатов поиска (очищается через 2 минуты)
+const searchCache = new Map();
+
 // ── Ready ────────────────────────────────────────────────────────────────────
 client.once(Events.ClientReady, async () => {
   console.log(`READY as ${client.user.tag}`);
-  // Прогреть кеш участников всех серверов
   for (const guild of client.guilds.cache.values())
     await guild.members.fetch().catch(() => {});
 });
@@ -117,52 +188,235 @@ client.once(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async i => {
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SLASH
+  // SLASH COMMANDS
   // ═══════════════════════════════════════════════════════════════════════════
-  if (i.isChatInputCommand() && i.commandName === "капт") {
-    const id = Date.now().toString();
+  if (i.isChatInputCommand()) {
 
-    data[id] = {
-      id,
-      owner:    i.user.id,
-      admins:   [],
-      users:    [],
-      reserves: [],
-      title:    i.options.getString("название"),
-      date:     i.options.getString("дата"),
-      closed:    false,
-      threadId:  null,
-      messageId: null,
-      channelId: i.channelId
-    };
+    // ── /капт ────────────────────────────────────────────────────────────────
+    if (i.commandName === "капт") {
+      const id = Date.now().toString();
 
-    const msg = await i.reply({
-      embeds:     [makeEmbed(data[id])],
-      components: [mainRow(id)],
-      fetchReply: true
-    });
+      data[id] = {
+        id,
+        owner:    i.user.id,
+        admins:   [],
+        users:    [],
+        reserves: [],
+        title:    i.options.getString("название"),
+        date:     i.options.getString("дата"),
+        closed:    false,
+        threadId:  null,
+        messageId: null,
+        channelId: i.channelId
+      };
 
-    data[id].messageId = msg.id;
-    save();
-    return;
+      const msg = await i.reply({
+        embeds:     [makeEmbed(data[id])],
+        components: [mainRow(id)],
+        fetchReply: true
+      });
+
+      data[id].messageId = msg.id;
+      save();
+      return;
+    }
+
+    // ── /play ─────────────────────────────────────────────────────────────────
+    if (i.commandName === "play") {
+      const query = i.options.getString("запрос");
+
+      // Проверяем что пользователь в войс-канале
+      const voiceChannel = i.member?.voice?.channel;
+      if (!voiceChannel)
+        return i.reply({ content: "❌ Зайди в войс-канал сначала!", ephemeral: true });
+
+      await i.deferReply();
+
+      try {
+        // Ищем на YouTube и SoundCloud параллельно
+        const [ytResults, scResults] = await Promise.allSettled([
+          playdl.search(query, { source: { youtube: "video" }, limit: 3 }),
+          playdl.search(query, { source: { soundcloud: "tracks" }, limit: 2 })
+        ]);
+
+        const results = [];
+
+        if (ytResults.status === "fulfilled") {
+          for (const v of ytResults.value) {
+            const dur = v.durationInSec
+              ? `${Math.floor(v.durationInSec / 60)}:${String(v.durationInSec % 60).padStart(2, "0")}`
+              : "?:??";
+            results.push({
+              title:  v.title || "Без названия",
+              url:    v.url,
+              dur,
+              source: "youtube",
+              emoji:  "▶️"
+            });
+          }
+        }
+
+        if (scResults.status === "fulfilled") {
+          for (const v of scResults.value) {
+            const dur = v.durationInSec
+              ? `${Math.floor(v.durationInSec / 60)}:${String(v.durationInSec % 60).padStart(2, "0")}`
+              : "?:??";
+            results.push({
+              title:  v.name || "Без названия",
+              url:    v.url,
+              dur,
+              source: "soundcloud",
+              emoji:  "☁️"
+            });
+          }
+        }
+
+        if (!results.length)
+          return i.editReply("❌ Ничего не найдено. Попробуй другой запрос.");
+
+        // Сохраняем в кеш
+        const searchId = `${i.guildId}-${Date.now()}`;
+        searchCache.set(searchId, { results, voiceChannelId: voiceChannel.id });
+        setTimeout(() => searchCache.delete(searchId), 2 * 60 * 1000);
+
+        // Формируем красивый список
+        const list = results.map((r, idx) =>
+          `**${idx + 1}.** ${r.emoji} ${r.title} \`[${r.dur}]\` — ${r.source === "youtube" ? "YouTube" : "SoundCloud"}`
+        ).join("\n");
+
+        const embed = new EmbedBuilder()
+          .setColor("#FF0000")
+          .setTitle("🔍 Результаты поиска")
+          .setDescription(`**Запрос:** ${query}\n\n${list}`)
+          .setFooter({ text: "Нажми кнопку чтобы включить трек" });
+
+        const rows = buildSearchRows(results, searchId);
+        return i.editReply({ embeds: [embed], components: rows });
+
+      } catch (err) {
+        console.error("Ошибка поиска:", err);
+        return i.editReply("❌ Ошибка при поиске. Попробуй позже.");
+      }
+    }
+
+    // ── /skip ─────────────────────────────────────────────────────────────────
+    if (i.commandName === "skip") {
+      const m = getMusic(i.guildId);
+      if (!m.current)
+        return i.reply({ content: "❌ Сейчас ничего не играет", ephemeral: true });
+      m.player?.stop();
+      return i.reply({ content: "⏭ Трек пропущен" });
+    }
+
+    // ── /stop ─────────────────────────────────────────────────────────────────
+    if (i.commandName === "stop") {
+      const m = getMusic(i.guildId);
+      m.queue = [];
+      m.current = null;
+      m.player?.stop();
+      m.connection?.destroy();
+      m.connection = null;
+      return i.reply({ content: "⏹ Музыка остановлена, бот вышел из канала" });
+    }
+
+    // ── /queue ────────────────────────────────────────────────────────────────
+    if (i.commandName === "queue") {
+      const m = getMusic(i.guildId);
+      if (!m.current && !m.queue.length)
+        return i.reply({ content: "📭 Очередь пуста", ephemeral: true });
+
+      const lines = [];
+      if (m.current)
+        lines.push(`▶️ **Сейчас:** ${m.current.title} \`[${m.current.dur}]\``);
+      m.queue.forEach((t, idx) =>
+        lines.push(`${idx + 1}. ${t.emoji} ${t.title} \`[${t.dur}]\``)
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setTitle("🎵 Очередь воспроизведения")
+        .setDescription(lines.join("\n"));
+
+      return i.reply({ embeds: [embed] });
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // BUTTONS
   // ═══════════════════════════════════════════════════════════════════════════
   if (i.isButton()) {
-    // customId формат: "action:captId" или "action:captId:userId"
     const parts    = i.customId.split(":");
     const action   = parts[0];
+
+    // ── Выбор трека из поиска ─────────────────────────────────────────────────
+    if (action === "play-pick") {
+      const searchId = parts[1];
+      const idx      = parseInt(parts[2]);
+      const cached   = searchCache.get(searchId);
+
+      if (!cached)
+        return i.reply({ content: "❌ Поиск устарел, введи /play заново", ephemeral: true });
+
+      const track = cached.results[idx];
+      const voiceChannel = i.member?.voice?.channel;
+      if (!voiceChannel)
+        return i.reply({ content: "❌ Зайди в войс-канал!", ephemeral: true });
+
+      await i.deferUpdate();
+
+      const m = getMusic(i.guildId);
+
+      // Подключаемся к каналу если ещё не подключены
+      if (!m.connection || m.connection.state.status === VoiceConnectionStatus.Destroyed) {
+        m.connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId:   i.guildId,
+          adapterCreator: i.guild.voiceAdapterCreator
+        });
+
+        m.player = createAudioPlayer();
+        m.connection.subscribe(m.player);
+
+        // Когда трек заканчивается — включаем следующий
+        m.player.on(AudioPlayerStatus.Idle, () => playNext(i.guildId));
+
+        m.player.on("error", err => {
+          console.error("Player error:", err);
+          playNext(i.guildId);
+        });
+      }
+
+      // Добавляем в очередь
+      m.queue.push(track);
+
+      // Если сейчас ничего не играет — сразу запускаем
+      if (!m.current) {
+        await playNext(i.guildId);
+        await i.editReply({
+          content: `▶️ Играю: **${track.title}**`,
+          embeds: [],
+          components: []
+        });
+      } else {
+        await i.editReply({
+          content: `➕ Добавлено в очередь: **${track.title}**`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      searchCache.delete(searchId);
+      return;
+    }
+
+    // ── Капт кнопки (всё остальное как было) ─────────────────────────────────
     const captId   = parts[1];
-    const targetId = parts[2]; // есть только у picker-кнопок
+    const targetId = parts[2];
 
     const c = data[captId];
     if (!c) return i.reply({ content: "Капт не найден", ephemeral: true });
 
     const canManage = c.owner === i.user.id || c.admins.includes(i.user.id);
-
-    // ── Публичные ────────────────────────────────────────────────────────────
 
     if (action === "join") {
       if (c.closed)
@@ -186,8 +440,6 @@ client.on(Events.InteractionCreate, async i => {
       await refresh(c);
       return i.reply({ content: "Вы вышли из списка", ephemeral: true });
     }
-
-    // ── Панель управления ─────────────────────────────────────────────────────
 
     if (action === "manage") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
@@ -214,8 +466,6 @@ client.on(Events.InteractionCreate, async i => {
       return i.reply({ content: "⚙️ Панель управления", components: [r1, r2, r3, r4], ephemeral: true });
     }
 
-    // ── Редактирование через модалку (только текст) ────────────────────────
-
     if (action === "edit-title") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
       const m = new ModalBuilder().setCustomId(`modal-title:${captId}`).setTitle("Изменить название");
@@ -234,79 +484,57 @@ client.on(Events.InteractionCreate, async i => {
       return i.showModal(m);
     }
 
-    // ── Добавить участника (модалка с ID/упоминанием) ─────────────────────
-
     if (action === "adduser") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
       const m = new ModalBuilder().setCustomId(`modal-adduser:${captId}`).setTitle("Добавить участника");
       m.addComponents(new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId("val")
-          .setLabel("ID пользователя")
+          .setCustomId("val").setLabel("ID пользователя")
           .setPlaceholder("Вставьте числовой ID (ПКМ → Копировать ID)")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
+          .setStyle(TextInputStyle.Short).setRequired(true)
       ));
       return i.showModal(m);
     }
-
-    // ── Добавить админа (модалка) ─────────────────────────────────────────
 
     if (action === "addadmin") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
       const m = new ModalBuilder().setCustomId(`modal-addadmin:${captId}`).setTitle("Добавить админа");
       m.addComponents(new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId("val")
-          .setLabel("ID пользователя")
+          .setCustomId("val").setLabel("ID пользователя")
           .setPlaceholder("Вставьте числовой ID (ПКМ → Копировать ID)")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
+          .setStyle(TextInputStyle.Short).setRequired(true)
       ));
       return i.showModal(m);
     }
 
-    // ── Убрать участника — picker-кнопки ─────────────────────────────────
-
     if (action === "deluser") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
       const all = [...c.users, ...c.reserves];
-      if (!all.length)
-        return i.reply({ content: "Список пуст", ephemeral: true });
-
+      if (!all.length) return i.reply({ content: "Список пуст", ephemeral: true });
       await i.deferReply({ ephemeral: true });
       await i.guild.members.fetch().catch(() => {});
       const rows = buildPickerRows("pick-del", captId, all, i.guild);
       return i.editReply({ content: "Выберите кого убрать:", components: rows });
     }
 
-    // ── В замену — picker из основного списка ────────────────────────────
-
     if (action === "tomreserve") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-      if (!c.users.length)
-        return i.reply({ content: "Основной список пуст", ephemeral: true });
-
+      if (!c.users.length) return i.reply({ content: "Основной список пуст", ephemeral: true });
       await i.deferReply({ ephemeral: true });
       await i.guild.members.fetch().catch(() => {});
       const rows = buildPickerRows("pick-reserve", captId, c.users, i.guild);
       return i.editReply({ content: "Кого переместить в замену?", components: rows });
     }
 
-    // ── Убрать админа — picker ────────────────────────────────────────────
-
     if (action === "deladmin") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-      if (!c.admins.length)
-        return i.reply({ content: "Нет админов", ephemeral: true });
-
+      if (!c.admins.length) return i.reply({ content: "Нет админов", ephemeral: true });
       await i.deferReply({ ephemeral: true });
       await i.guild.members.fetch().catch(() => {});
       const rows = buildPickerRows("pick-deladmin", captId, c.admins, i.guild);
       return i.editReply({ content: "Кого убрать из админов?", components: rows });
     }
-
-    // ── Picker-подтверждения ──────────────────────────────────────────────
 
     if (action === "pick-del") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
@@ -337,26 +565,18 @@ client.on(Events.InteractionCreate, async i => {
       return i.reply({ content: `✅ <@${targetId}> убран из админов`, ephemeral: true });
     }
 
-    // ── Ветка ────────────────────────────────────────────────────────────────
-
     if (action === "thread") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
-      if (c.threadId)  return i.reply({ content: "❌ Ветка уже создана", ephemeral: true });
-
+      if (c.threadId) return i.reply({ content: "❌ Ветка уже создана", ephemeral: true });
       const m = new ModalBuilder().setCustomId(`modal-thread:${captId}`).setTitle("Создание ветки");
       m.addComponents(new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId("val")
-          .setLabel("Название ветки")
+          .setCustomId("val").setLabel("Название ветки")
           .setPlaceholder("Например: Капт 20:00")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(100)
+          .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100)
       ));
       return i.showModal(m);
     }
-
-    // ── Открыть/Закрыть ──────────────────────────────────────────────────────
 
     if (action === "toggle") {
       if (!canManage) return i.reply({ content: "Нет прав", ephemeral: true });
@@ -365,8 +585,6 @@ client.on(Events.InteractionCreate, async i => {
       await refresh(c);
       return i.reply({ content: `Капт теперь ${c.closed ? "закрыт 🔒" : "открыт 🔓"}`, ephemeral: true });
     }
-
-    // ── Удалить ───────────────────────────────────────────────────────────────
 
     if (action === "delete") {
       if (i.user.id !== c.owner)
@@ -384,7 +602,7 @@ client.on(Events.InteractionCreate, async i => {
   // ═══════════════════════════════════════════════════════════════════════════
   if (i.isModalSubmit()) {
     const parts  = i.customId.split(":");
-    const action = parts[0]; // "modal-title", "modal-adduser", ...
+    const action = parts[0];
     const captId = parts[1];
     const c      = data[captId];
     if (!c) return i.reply({ content: "Капт не найден", ephemeral: true });
@@ -392,65 +610,44 @@ client.on(Events.InteractionCreate, async i => {
     const val = i.fields.getTextInputValue("val").trim();
 
     if (action === "modal-title") {
-      c.title = val;
-      save();
-      await refresh(c);
+      c.title = val; save(); await refresh(c);
       return i.reply({ content: "✅ Название обновлено", ephemeral: true });
     }
 
     if (action === "modal-time") {
-      c.date = val;
-      save();
-      await refresh(c);
+      c.date = val; save(); await refresh(c);
       return i.reply({ content: "✅ Время обновлено", ephemeral: true });
     }
 
-    // Добавить участника — принимаем чистый ID
     if (action === "modal-adduser") {
-      const uid = val.replace(/\D/g, ""); // оставить только цифры
-      if (!uid)
-        return i.reply({ content: "❌ Введите числовой ID пользователя", ephemeral: true });
+      const uid = val.replace(/\D/g, "");
+      if (!uid) return i.reply({ content: "❌ Введите числовой ID пользователя", ephemeral: true });
       if (c.users.includes(uid) || c.reserves.includes(uid))
         return i.reply({ content: "Этот пользователь уже в списке", ephemeral: true });
-      c.users.push(uid);
-      save();
-      await refresh(c);
+      c.users.push(uid); save(); await refresh(c);
       return i.reply({ content: `✅ <@${uid}> добавлен в список`, ephemeral: true });
     }
 
-    // Добавить админа
     if (action === "modal-addadmin") {
       const uid = val.replace(/\D/g, "");
-      if (!uid)
-        return i.reply({ content: "❌ Введите числовой ID пользователя", ephemeral: true });
+      if (!uid) return i.reply({ content: "❌ Введите числовой ID пользователя", ephemeral: true });
       if (!c.admins.includes(uid)) c.admins.push(uid);
-      save();
-      await refresh(c);
+      save(); await refresh(c);
       return i.reply({ content: `✅ <@${uid}> добавлен как админ`, ephemeral: true });
     }
 
-    // Создать ветку
     if (action === "modal-thread") {
-      if (c.threadId)
-        return i.reply({ content: "❌ Ветка уже существует", ephemeral: true });
-
+      if (c.threadId) return i.reply({ content: "❌ Ветка уже существует", ephemeral: true });
       const threadChannel = await client.channels.fetch(c.channelId).catch(() => null);
       if (!threadChannel) return i.reply({ content: "Не удалось найти канал капта", ephemeral: true });
       const msg = await threadChannel.messages.fetch(c.messageId).catch(() => null);
       if (!msg) return i.reply({ content: "Не удалось найти сообщение капта", ephemeral: true });
-
       const thread = await msg.startThread({ name: val, autoArchiveDuration: 1440 }).catch(() => null);
       if (!thread) return i.reply({ content: "Не удалось создать ветку", ephemeral: true });
-
-      c.threadId = thread.id;
-      save();
-
+      c.threadId = thread.id; save();
       const allIds = [...c.users, ...c.reserves];
-      if (allIds.length) {
-        const mentions = allIds.map(u => `<@${u}>`).join(" ");
-        await thread.send(`👥 Участники капта: ${mentions}`).catch(() => {});
-      }
-
+      if (allIds.length)
+        await thread.send(`👥 Участники капта: ${allIds.map(u => `<@${u}>`).join(" ")}`).catch(() => {});
       return i.reply({ content: `🧵 Ветка создана: <#${thread.id}>`, ephemeral: true });
     }
   }
@@ -462,7 +659,24 @@ const commands = [
     .setName("капт")
     .setDescription("Создать новый капт")
     .addStringOption(o => o.setName("название").setDescription("Название капта").setRequired(true))
-    .addStringOption(o => o.setName("дата").setDescription("Дата и время").setRequired(true))
+    .addStringOption(o => o.setName("дата").setDescription("Дата и время").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("play")
+    .setDescription("Найти и включить музыку (YouTube / SoundCloud)")
+    .addStringOption(o => o.setName("запрос").setDescription("Название песни или исполнитель").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("skip")
+    .setDescription("Пропустить текущий трек"),
+
+  new SlashCommandBuilder()
+    .setName("stop")
+    .setDescription("Остановить музыку и выйти из канала"),
+
+  new SlashCommandBuilder()
+    .setName("queue")
+    .setDescription("Показать очередь воспроизведения")
 ];
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
